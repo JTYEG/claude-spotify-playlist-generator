@@ -10,6 +10,7 @@ const els = {
   btnGenerate:      $("btn-generate"),
   btnLogout:        $("btn-logout"),
   btnAnother:       $("btn-another"),
+  btnMakeAnother:   $("btn-make-another"),
   btnRegenerate:    $("btn-regenerate"),
   btnSave:          $("btn-save"),
   btnRetry:         $("btn-retry"),
@@ -170,6 +171,13 @@ els.btnRegenerate.addEventListener("click", () => {
 });
 
 els.btnAnother.addEventListener("click", () => {
+  els.promptInput.value = "";
+  currentSongs = [];
+  setState(State.LOGGED_IN);
+  els.promptInput.focus();
+});
+
+els.btnMakeAnother.addEventListener("click", () => {
   els.promptInput.value = "";
   currentSongs = [];
   setState(State.LOGGED_IN);
