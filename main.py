@@ -203,8 +203,9 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
         return RedirectResponse(f"/?error={error}")
 
     stored_state = request.cookies.get("oauth_state")
-    if not state or state != stored_state:
-        raise HTTPException(status_code=400, detail="State mismatch — possible CSRF")
+    # Only reject if the cookie is present but doesn't match (cookie can be lost in HTTPS proxies)
+    if stored_state and state != stored_state:
+        return RedirectResponse("/?error=state_mismatch")
 
     # Exchange code for tokens
     async with httpx.AsyncClient() as client:

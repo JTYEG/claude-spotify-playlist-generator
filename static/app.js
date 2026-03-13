@@ -147,6 +147,13 @@ async function init() {
       }
     } else {
       setState(State.LOGGED_OUT);
+      if (oauthError) {
+        // Show error below the login button
+        const errEl = document.createElement("p");
+        errEl.style.cssText = "color:#e74c3c;margin-top:1rem;font-size:.9rem;";
+        errEl.textContent = `Login error: ${oauthError}`;
+        document.getElementById("section-logged-out").appendChild(errEl);
+      }
     }
   } catch {
     setState(State.LOGGED_OUT);
