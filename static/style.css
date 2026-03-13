@@ -262,3 +262,38 @@ textarea::placeholder {
 #btn-generate {
   margin-top: 4px;
 }
+
+/* Song count slider */
+.slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.slider-group label {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.slider-group input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface2);
+  outline: none;
+}
+
+.slider-group input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--green);
+  cursor: pointer;
+}
+
+#btn-regenerate {
+  margin-top: 4px;
+}

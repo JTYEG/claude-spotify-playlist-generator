@@ -100,11 +100,11 @@ async def refresh_token_if_needed(session: dict) -> dict:
 # Claude helper
 # ---------------------------------------------------------------------------
 
-def get_songs_from_claude(prompt: str) -> list[dict]:
+def get_songs_from_claude(prompt: str, song_count: int = 15) -> list[dict]:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     user_message = (
-        f'Generate 15 song recommendations for a playlist described as: "{prompt}"\n\n'
-        "Return exactly 15 songs as a JSON array with 'title' and 'artist' keys only. "
+        f'Generate {song_count} song recommendations for a playlist described as: "{prompt}"\n\n'
+        f"Return exactly {song_count} songs as a JSON array with 'title' and 'artist' keys only. "
         "Make them well-known enough to be findable on Spotify. "
         "Vary the artists — do not repeat the same artist more than twice."
     )
@@ -268,6 +268,7 @@ async def auth_logout(request: Request):
 
 class GenerateRequest(BaseModel):
     prompt: str
+    song_count: int = 15
 
 
 @app.post("/api/generate-playlist")
@@ -289,9 +290,11 @@ async def generate_playlist(request: Request, body: GenerateRequest):
     access_token = session["access_token"]
     user_id = session["user_id"]
 
+    song_count = max(5, min(50, body.song_count))  # clamp between 5 and 50
+
     # Step 1: Get songs from Claude
     try:
-        songs = get_songs_from_claude(prompt)
+        songs = get_songs_from_claude(prompt, song_count)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Claude error: {str(e)}")
 

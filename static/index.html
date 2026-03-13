@@ -39,6 +39,11 @@
         <p class="error-msg hidden" id="prompt-error">Please enter a prompt first.</p>
       </div>
 
+      <div class="slider-group">
+        <label for="song-count">Songs: <span id="song-count-label">15</span></label>
+        <input type="range" id="song-count" min="10" max="30" step="5" value="15" />
+      </div>
+
       <button id="btn-generate" class="btn btn-spotify">
         Generate Playlist
       </button>
@@ -57,6 +62,7 @@
         <a id="result-link" href="#" target="_blank" rel="noopener" class="btn btn-outline">
           Open in Spotify
         </a>
+        <button id="btn-regenerate" class="btn btn-ghost">Regenerate</button>
         <button id="btn-another" class="btn btn-ghost">Make another</button>
       </div>
 

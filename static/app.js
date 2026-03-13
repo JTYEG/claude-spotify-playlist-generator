@@ -10,10 +10,13 @@ const els = {
   btnGenerate:      $("btn-generate"),
   btnLogout:        $("btn-logout"),
   btnAnother:       $("btn-another"),
+  btnRegenerate:    $("btn-regenerate"),
   btnRetry:         $("btn-retry"),
   welcomeText:      $("welcome-text"),
   promptInput:      $("prompt-input"),
   promptError:      $("prompt-error"),
+  songCount:        $("song-count"),
+  songCountLabel:   $("song-count-label"),
   sectionLoading:   $("section-loading"),
   sectionSuccess:   $("section-success"),
   sectionError:     $("section-error"),
@@ -22,6 +25,8 @@ const els = {
   resultLink:       $("result-link"),
   errorMessage:     $("error-message"),
 };
+
+let lastPrompt = "";
 
 function setState(state, payload = {}) {
   // Reset all dynamic sections
@@ -81,31 +86,24 @@ els.btnLogout.addEventListener("click", () => {
   window.location.href = "/auth/logout";
 });
 
-els.btnGenerate.addEventListener("click", async () => {
-  const prompt = els.promptInput.value.trim();
-  if (!prompt) {
-    els.promptError.classList.remove("hidden");
-    els.promptInput.focus();
-    return;
-  }
-  els.promptError.classList.add("hidden");
+els.songCount.addEventListener("input", () => {
+  els.songCountLabel.textContent = els.songCount.value;
+});
 
+async function generatePlaylist(prompt) {
   setState(State.LOADING);
-
+  const song_count = parseInt(els.songCount.value, 10);
   try {
     const resp = await fetch("/api/generate-playlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, song_count }),
     });
-
     const data = await resp.json();
-
     if (!resp.ok) {
       setState(State.ERROR, { message: data.detail || `Error ${resp.status}` });
       return;
     }
-
     setState(State.SUCCESS, {
       playlistName: data.playlist_name,
       playlistUrl: data.playlist_url,
@@ -115,6 +113,22 @@ els.btnGenerate.addEventListener("click", async () => {
   } catch (err) {
     setState(State.ERROR, { message: "Network error — please check your connection and try again." });
   }
+}
+
+els.btnGenerate.addEventListener("click", () => {
+  const prompt = els.promptInput.value.trim();
+  if (!prompt) {
+    els.promptError.classList.remove("hidden");
+    els.promptInput.focus();
+    return;
+  }
+  els.promptError.classList.add("hidden");
+  lastPrompt = prompt;
+  generatePlaylist(prompt);
+});
+
+els.btnRegenerate.addEventListener("click", () => {
+  if (lastPrompt) generatePlaylist(lastPrompt);
 });
 
 els.btnAnother.addEventListener("click", () => {
