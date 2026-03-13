@@ -34,6 +34,7 @@ const els = {
 
 let lastPrompt = "";
 let currentSongs = [];
+let currentUris = [];
 
 function setState(state, payload = {}) {
   els.sectionLoggedOut.classList.add("hidden");
@@ -79,10 +80,7 @@ function setState(state, payload = {}) {
     els.sectionSuccess.classList.remove("hidden");
     els.resultName.textContent = payload.playlistName || "";
     const count = payload.tracksFound || 0;
-    const skipped = (payload.tracksNotFound || []).length;
-    els.resultCount.textContent = skipped > 0
-      ? `${count} tracks added (${skipped} not found on Spotify)`
-      : `${count} tracks added`;
+    els.resultCount.textContent = `${count} tracks added`;
     els.resultLink.href = payload.playlistUrl || "#";
   }
 
@@ -98,7 +96,7 @@ function setState(state, payload = {}) {
 // ---------------------------------------------------------------------------
 
 async function fetchSongs(prompt) {
-  setState(State.LOADING, { message: "Claude is picking songs\u2026" });
+  setState(State.LOADING, { message: "Claude is picking songs and checking Spotify\u2026" });
   const song_count = parseInt(els.songCount.value, 10);
   try {
     const resp = await fetch("/api/get-songs", {
@@ -112,6 +110,7 @@ async function fetchSongs(prompt) {
       return;
     }
     currentSongs = data.songs;
+    currentUris = data.songs.map(s => s.uri);
     setState(State.PREVIEW, { songs: currentSongs });
   } catch {
     setState(State.ERROR, { message: "Network error — please check your connection and try again." });
@@ -126,7 +125,7 @@ async function savePlaylist() {
     const resp = await fetch("/api/save-playlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: lastPrompt, songs: currentSongs, playlist_name }),
+      body: JSON.stringify({ uris: currentUris, playlist_name }),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -137,7 +136,6 @@ async function savePlaylist() {
       playlistName: data.playlist_name,
       playlistUrl: data.playlist_url,
       tracksFound: data.tracks_found,
-      tracksNotFound: data.tracks_not_found,
     });
   } catch {
     setState(State.ERROR, { message: "Network error — please check your connection and try again." });
@@ -176,6 +174,7 @@ els.btnRegenerate.addEventListener("click", () => {
 els.btnAnother.addEventListener("click", () => {
   els.promptInput.value = "";
   currentSongs = [];
+  currentUris = [];
   setState(State.LOGGED_IN);
   els.promptInput.focus();
 });
@@ -183,6 +182,7 @@ els.btnAnother.addEventListener("click", () => {
 els.btnMakeAnother.addEventListener("click", () => {
   els.promptInput.value = "";
   currentSongs = [];
+  currentUris = [];
   setState(State.LOGGED_IN);
   els.promptInput.focus();
 });
