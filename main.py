@@ -8,7 +8,7 @@ import anthropic
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from pydantic import BaseModel
@@ -338,7 +338,12 @@ async def generate_playlist(request: Request, body: GenerateRequest):
 
 
 # ---------------------------------------------------------------------------
-# Serve static files (must be last so it acts as catch-all)
+# Serve static assets and index page
 # ---------------------------------------------------------------------------
 
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/")
+async def index():
+    return FileResponse("static/index.html")
