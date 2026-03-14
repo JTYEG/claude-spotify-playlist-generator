@@ -619,14 +619,16 @@ async def get_songs(request: Request, body: GenerateRequest):
     for song in ranked:
         result = await search_track(song["track"], song["artist"], access_token)
         if result:
-            found.append({
+            entry = {
                 "title":        song["track"],
                 "artist":       song["artist"],
                 "uri":          result["uri"],
                 "spotify_id":   result["spotify_id"],
                 "external_url": result["external_url"],
-                "reason":       song.get("reason", ""),
-            })
+            }
+            if body.show_reasons:
+                entry["reason"] = song.get("reason", "")
+            found.append(entry)
         if len(found) >= song_count:
             break
 
