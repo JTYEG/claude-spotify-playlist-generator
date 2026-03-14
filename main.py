@@ -43,6 +43,20 @@ Rules:
 - ONLY use tracks from candidate_tracks. Never invent or add songs not in the list.
 - Do not include the seed track itself.
 - Do not repeat the same artist more than twice.
+- Return ONLY valid JSON. No explanations, no markdown, no code blocks.
+
+Example output: {"ranked_tracks": [{"artist": "New Order", "track": "Blue Monday"}]}"""
+
+CLAUDE_SYSTEM_PROMPT_WITH_REASONS = """You are a music ranking engine.
+
+You receive a JSON object describing a seed, tags, a mode, and a list of candidate tracks sourced from Last.fm.
+
+Your task: select and rank the best candidates according to the mode instruction.
+
+Rules:
+- ONLY use tracks from candidate_tracks. Never invent or add songs not in the list.
+- Do not include the seed track itself.
+- Do not repeat the same artist more than twice.
 - For each track include a "reason" field: 3-5 words explaining why it fits.
 - Return ONLY valid JSON. No explanations, no markdown, no code blocks.
 
@@ -353,6 +367,7 @@ def rank_candidates_with_claude(
     candidates: list[dict],
     count: int = 20,
     blend_context: str = "",
+    show_reasons: bool = False,
 ) -> list[dict]:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -374,7 +389,7 @@ def rank_candidates_with_claude(
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=600,
-        system=CLAUDE_SYSTEM_PROMPT,
+        system=CLAUDE_SYSTEM_PROMPT_WITH_REASONS if show_reasons else CLAUDE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": json.dumps(payload)}],
     )
     content = response.content[0].text.strip()
@@ -539,6 +554,7 @@ class GenerateRequest(BaseModel):
     prompt: str = ""                   # optional extra context for ranking
     song_count: int = 15
     mode: str = "adjacent_discovery"
+    show_reasons: bool = False
 
 
 class SaveRequest(BaseModel):
@@ -593,7 +609,7 @@ async def get_songs(request: Request, body: GenerateRequest):
     try:
         ranked = rank_candidates_with_claude(
             pool["seed"], pool["tags"], mode, description, pool["candidates"],
-            count=rank_count, blend_context=blend_context,
+            count=rank_count, blend_context=blend_context, show_reasons=body.show_reasons,
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Claude error: {str(e)}")
