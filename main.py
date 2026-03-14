@@ -204,7 +204,57 @@ async def lastfm_artist_top_tracks(artist: str, limit: int = 10) -> list[str]:
     return [t["name"] for t in tracks]
 
 
-async def build_lastfm_context(seed: str, mode: str) -> str:
+async def lastfm_tag_top_artists(tag: str, limit: int = 8) -> list[str]:
+    data = await _lastfm("tag.gettopartists", {"tag": tag, "limit": limit})
+    artists = data.get("topartists", {}).get("artist", [])
+    return [a["name"] for a in artists]
+
+
+async def lastfm_tag_top_tracks(tag: str, limit: int = 8) -> list[str]:
+    data = await _lastfm("tag.gettoptracks", {"tag": tag, "limit": limit})
+    tracks = data.get("tracks", {}).get("track", [])
+    return [f"{t['name']} by {t['artist']['name']}" for t in tracks]
+
+
+_STYLE_STOPWORDS = {
+    "but", "more", "and", "or", "style", "feel", "vibe", "vibes", "with",
+    "like", "in", "the", "a", "an", "i", "want", "something", "bit", "of",
+    "some", "very", "really", "kind", "sort", "type", "feel", "sounds",
+}
+
+async def extract_style_context(description: str) -> str:
+    """Try words/phrases from the description as Last.fm tags, return enrichment for any that match."""
+    if not description:
+        return ""
+    import re
+    # Split on commas, "but", "and" to get candidate phrases
+    raw = re.split(r"[,]|\bbut\b|\band\b", description.lower())
+    candidates = []
+    for phrase in raw:
+        cleaned = phrase.strip()
+        # Remove leading filler words
+        cleaned = re.sub(r"^\s*(more|bit of|a bit|very|really|something|in a|with a|with)\s+", "", cleaned).strip()
+        if cleaned and cleaned not in _STYLE_STOPWORDS and len(cleaned) > 2:
+            candidates.append(cleaned)
+
+    lines = []
+    import asyncio
+    for candidate in candidates[:3]:  # try up to 3 candidates
+        artists, tracks = await asyncio.gather(
+            lastfm_tag_top_artists(candidate),
+            lastfm_tag_top_tracks(candidate),
+        )
+        if artists:
+            lines.append(f"Top artists tagged '{candidate}': {', '.join(artists)}")
+        if tracks:
+            lines.append(f"Top tracks tagged '{candidate}': {', '.join(tracks)}")
+        if artists or tracks:
+            break  # one good tag match is enough
+
+    return "\n".join(lines)
+
+
+async def build_lastfm_context(seed: str, mode: str, description: str = "") -> str:
     if not seed or not LASTFM_API_KEY:
         return ""
 
@@ -268,6 +318,11 @@ async def build_lastfm_context(seed: str, mode: str) -> str:
             lines.append(f"Genres/tags for {artist}: {', '.join(tags)}")
         if similar_artists:
             lines.append(f"Artists in same space as {artist} (use as loose inspiration only): {', '.join(similar_artists)}")
+
+    # Style enrichment from description (e.g. "but more electronic", "jazz feel")
+    style_context = await extract_style_context(description)
+    if style_context:
+        lines.append(style_context)
 
     return "\n".join(lines)
 
@@ -478,7 +533,7 @@ async def get_songs(request: Request, body: GenerateRequest):
     access_token = session["access_token"]
     song_count = max(5, min(50, body.song_count))
     mode = body.mode if body.mode in MODE_PROMPTS else "adjacent_discovery"
-    lastfm_context = await build_lastfm_context(body.seed.strip(), mode)
+    lastfm_context = await build_lastfm_context(body.seed.strip(), mode, prompt)
 
     try:
         songs = get_songs_from_claude(prompt, song_count, mode, lastfm_context)
