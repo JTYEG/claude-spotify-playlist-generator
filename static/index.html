@@ -15,7 +15,7 @@
         </svg>
         <span>AI Playlist Generator</span>
       </div>
-      <p class="subtitle">Describe a mood — Claude picks the songs, Spotify saves the playlist.</p>
+      <p class="subtitle">Enter a seed track, blend two artists, or describe a mood — Claude ranks the songs, Spotify saves the playlist.</p>
     </header>
 
     <!-- LOGGED OUT STATE -->
@@ -31,18 +31,18 @@
       <p class="welcome" id="welcome-text"></p>
 
       <div class="form-group">
-        <label for="seed-input">Seed <span class="label-hint">(artist or artist&nbsp;&mdash;&nbsp;track)</span></label>
-        <input type="text" id="seed-input" placeholder="e.g. Radiohead or Radiohead - Karma Police" autocomplete="off" />
+        <label for="seed-input">Seed <span class="label-hint">(artist, artist&nbsp;&mdash;&nbsp;track, or two artists with +)</span></label>
+        <input type="text" id="seed-input" placeholder="e.g. Soft Cell - Tainted Love or Radiohead + Aphex Twin" autocomplete="off" />
       </div>
 
       <div class="form-group">
-        <label for="prompt-input">Description <span class="label-hint">(optional extra context)</span></label>
+        <label for="prompt-input">Description <span class="label-hint">(optional — or use instead of seed for mood-only)</span></label>
         <textarea
           id="prompt-input"
           rows="2"
-          placeholder="e.g. melancholic, late night, cinematic..."
+          placeholder="e.g. melancholic late night cinematic — or leave seed empty for mood-only mode"
         ></textarea>
-        <p class="error-msg hidden" id="prompt-error">Please enter a seed artist or track.</p>
+        <p class="error-msg hidden" id="prompt-error">Please enter a seed or a mood description.</p>
       </div>
 
       <div class="slider-group discovery-group">

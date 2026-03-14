@@ -81,7 +81,7 @@ function setState(state, payload = {}) {
     els.previewList.innerHTML = "";
     (payload.songs || []).forEach(song => {
       const li = document.createElement("li");
-      li.innerHTML = `<span class="song-title">${song.title}</span><span class="song-artist">${song.artist}</span>`;
+      li.innerHTML = `<span class="song-title">${song.title}</span><span class="song-artist">${song.artist}</span>${song.reason ? `<span class="song-reason">${song.reason}</span>` : ""}`;
       els.previewList.appendChild(li);
     });
   }
@@ -180,14 +180,14 @@ els.discoveryMode.addEventListener("input", () => {
 
 els.btnGenerate.addEventListener("click", () => {
   const seed = els.seedInput.value.trim();
-  if (!seed) {
+  const prompt = els.promptInput.value.trim();
+  if (!seed && !prompt) {
     els.promptError.classList.remove("hidden");
     els.seedInput.focus();
     return;
   }
   els.promptError.classList.add("hidden");
-  const prompt = els.promptInput.value.trim() || seed;
-  lastPrompt = prompt;
+  lastPrompt = prompt || seed;
   fetchSongs(prompt);
 });
 

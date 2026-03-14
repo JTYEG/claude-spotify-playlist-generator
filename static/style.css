@@ -388,6 +388,13 @@ input[type="text"]::placeholder {
   font-size: 12px;
 }
 
+.song-reason {
+  color: var(--green);
+  font-size: 11px;
+  opacity: 0.7;
+  font-style: italic;
+}
+
 /* Playlist name input */
 .playlist-name-group {
   display: flex;

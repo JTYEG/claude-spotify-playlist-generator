@@ -35,7 +35,7 @@ signer = URLSafeTimedSerializer(SECRET_KEY)
 
 CLAUDE_SYSTEM_PROMPT = """You are a music ranking engine.
 
-You receive a JSON object describing a seed track, tags, a mode, and a list of candidate tracks sourced from Last.fm.
+You receive a JSON object describing a seed, tags, a mode, and a list of candidate tracks sourced from Last.fm.
 
 Your task: select and rank the best candidates according to the mode instruction.
 
@@ -43,9 +43,10 @@ Rules:
 - ONLY use tracks from candidate_tracks. Never invent or add songs not in the list.
 - Do not include the seed track itself.
 - Do not repeat the same artist more than twice.
+- For each track include a "reason" field: 3-5 words explaining why it fits.
 - Return ONLY valid JSON matching the output_schema. No explanations, no markdown, no code blocks.
 
-Example output: {"ranked_tracks": [{"artist": "New Order", "track": "Blue Monday"}]}"""
+Example output: {"ranked_tracks": [{"artist": "New Order", "track": "Blue Monday", "reason": "icy synth, detached vocals"}]}"""
 
 RANK_MODE_INSTRUCTIONS = {
     "tight_match":        "Rank by closest sonic and mood similarity to the seed. Prioritize tracks that feel nearly identical in style, energy, and production.",
@@ -181,6 +182,18 @@ async def _lfm_artist_top_tracks(artist: str, limit: int = 3) -> list[dict]:
     return [{"track": t["name"], "artist": artist} for t in tracks]
 
 
+async def _lfm_tag_top_artists(tag: str, limit: int = 8) -> list[str]:
+    data = await _lastfm("tag.getTopArtists", {"tag": tag, "limit": limit})
+    artists = data.get("topartists", {}).get("artist", [])
+    return [a["name"] for a in artists]
+
+
+async def _lfm_tag_top_tracks(tag: str, limit: int = 8) -> list[dict]:
+    data = await _lastfm("tag.getTopTracks", {"tag": tag, "limit": limit})
+    tracks = data.get("tracks", {}).get("track", [])
+    return [{"track": t["name"], "artist": t["artist"]["name"]} for t in tracks]
+
+
 def _unique_by_artist_limit(tracks: list[dict], max_per_artist: int = 2) -> list[dict]:
     """Limit candidates to max_per_artist tracks per artist."""
     counts: dict[str, int] = {}
@@ -191,6 +204,14 @@ def _unique_by_artist_limit(tracks: list[dict], max_per_artist: int = 2) -> list
             counts[key] = counts.get(key, 0) + 1
             result.append(t)
     return result
+
+
+async def build_seed_pool(seed_str: str) -> dict:
+    """Parse 'Artist' or 'Artist - Track' string and build candidate pool."""
+    parts = [p.strip() for p in seed_str.split(" - ", 1)]
+    artist = parts[0]
+    track = parts[1] if len(parts) > 1 else ""
+    return await build_candidate_pool(track, artist)
 
 
 async def build_candidate_pool(seed_track: str, seed_artist: str) -> dict:
@@ -244,6 +265,82 @@ async def build_candidate_pool(seed_track: str, seed_artist: str) -> dict:
     }
 
 
+async def build_mood_pool(description: str) -> dict:
+    """Mood-only pipeline: extract tags from description → Last.fm tag endpoints → candidate pool."""
+    stop_words = {"but", "more", "and", "or", "style", "feel", "vibe", "vibes", "with",
+                  "like", "in", "the", "a", "an", "i", "want", "something", "kind", "of",
+                  "music", "songs", "tracks", "please", "give", "me", "some"}
+    words = [w.strip(".,!?") for w in description.lower().split()]
+    mood_tags = [w for w in words if w and w not in stop_words and len(w) > 2][:3]
+
+    if not mood_tags:
+        raise ValueError("Could not extract mood tags from description")
+
+    # Fetch top artists + top tracks for each mood tag in parallel
+    results = await asyncio.gather(*[
+        asyncio.gather(
+            _lfm_tag_top_artists(tag, limit=8),
+            _lfm_tag_top_tracks(tag, limit=8),
+        )
+        for tag in mood_tags
+    ])
+
+    all_candidates: list[dict] = []
+    artist_names: list[str] = []
+    for artist_list, track_list in results:
+        all_candidates.extend(track_list)
+        artist_names.extend(artist_list)
+
+    # Get top tracks for the discovered artists too
+    unique_artists = list(dict.fromkeys(artist_names))[:8]
+    artist_track_lists = await asyncio.gather(
+        *[_lfm_artist_top_tracks(a, limit=2) for a in unique_artists]
+    )
+    for track_list in artist_track_lists:
+        all_candidates.extend(track_list)
+
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for c in all_candidates:
+        key = _normalize_key(c["track"], c["artist"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(c)
+
+    candidates = _unique_by_artist_limit(unique, max_per_artist=2)[:40]
+    return {
+        "seed":       {"track": "", "artist": description},
+        "tags":       mood_tags,
+        "candidates": candidates,
+    }
+
+
+async def build_blend_pool(seed1: str, seed2: str) -> dict:
+    """Blend pipeline: run both seeds in parallel, merge candidate pools."""
+    pool1, pool2 = await asyncio.gather(build_seed_pool(seed1), build_seed_pool(seed2))
+
+    all_candidates = list(pool1["candidates"]) + list(pool2["candidates"])
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for c in all_candidates:
+        key = _normalize_key(c["track"], c["artist"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(c)
+
+    candidates = _unique_by_artist_limit(unique, max_per_artist=2)[:40]
+    merged_tags = list(dict.fromkeys(pool1["tags"] + pool2["tags"]))[:6]
+
+    return {
+        "seed":       {"track": "", "artist": f"{pool1['seed']['artist']} + {pool2['seed']['artist']}"},
+        "tags":       merged_tags,
+        "candidates": candidates,
+        "blend":      True,
+        "seed1":      pool1["seed"],
+        "seed2":      pool2["seed"],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Claude helper — ranks provided candidates, never invents songs
 # ---------------------------------------------------------------------------
@@ -254,21 +351,25 @@ def rank_candidates_with_claude(
     mode: str,
     description: str,
     candidates: list[dict],
-    count: int = 25,
+    count: int = 20,
+    blend_context: str = "",
 ) -> list[dict]:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     mode_instruction = RANK_MODE_INSTRUCTIONS.get(mode, RANK_MODE_INSTRUCTIONS["adjacent_discovery"])
+    if blend_context:
+        mode_instruction = blend_context + " " + mode_instruction
     if tags:
-        mode_instruction += f" Track tags for context: {', '.join(tags[:4])}."
+        mode_instruction += f" Tags: {', '.join(tags[:4])}."
     if description:
-        mode_instruction += f" Additional context: {description}"
+        mode_instruction += f" Context: {description}"
 
     payload = {
         "task": f"Rank and return the best {count} candidate tracks in order of best fit to the seed.",
         "seed": {"artist": seed["artist"], "track": seed["track"]},
         "mode": mode_instruction,
         "candidate_tracks": [{"artist": c["artist"], "track": c["track"]} for c in candidates],
+        "output_schema": {"ranked_tracks": [{"artist": "string", "track": "string", "reason": "3-5 words"}]},
     }
 
     response = client.messages.create(
@@ -454,8 +555,10 @@ async def get_songs(request: Request, body: GenerateRequest):
         raise HTTPException(status_code=401, detail="Not logged in")
 
     seed = body.seed.strip()
-    if not seed:
-        raise HTTPException(status_code=400, detail="Seed is required")
+    description = body.prompt.strip()
+
+    if not seed and not description:
+        raise HTTPException(status_code=400, detail="Please enter a seed artist/track or a mood description")
 
     try:
         session = await refresh_token_if_needed(session)
@@ -465,27 +568,33 @@ async def get_songs(request: Request, body: GenerateRequest):
     access_token = session["access_token"]
     song_count = max(5, min(50, body.song_count))
     mode = body.mode if body.mode in RANK_MODE_INSTRUCTIONS else "adjacent_discovery"
-    description = body.prompt.strip()
 
-    # Parse seed: "Artist" or "Artist - Track"
-    parts = [p.strip() for p in seed.split(" - ", 1)]
-    seed_artist = parts[0]
-    seed_track  = parts[1] if len(parts) > 1 else ""
-
-    # Build Last.fm candidate pool
+    # Route to the right pipeline
     try:
-        pool = await build_candidate_pool(seed_track, seed_artist)
+        if "+" in seed:
+            parts = [p.strip() for p in seed.split("+", 1)]
+            pool = await build_blend_pool(parts[0], parts[1])
+        elif seed:
+            pool = await build_seed_pool(seed)
+        else:
+            pool = await build_mood_pool(description)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Last.fm error: {str(e)}")
 
     if not pool["candidates"]:
-        raise HTTPException(status_code=502, detail="No candidates found on Last.fm for this seed")
+        raise HTTPException(status_code=502, detail="No candidates found for this seed")
 
-    # Cap at 20 — enough fallback buffer without inflating output tokens (5× cost vs input)
     rank_count = min(20, len(pool["candidates"]))
+    blend_context = (
+        f"Blend request: find tracks that appeal to fans of both "
+        f"{pool['seed1']['artist']} and {pool['seed2']['artist']}."
+        if pool.get("blend") else ""
+    )
+
     try:
         ranked = rank_candidates_with_claude(
-            pool["seed"], pool["tags"], mode, description, pool["candidates"], count=rank_count
+            pool["seed"], pool["tags"], mode, description, pool["candidates"],
+            count=rank_count, blend_context=blend_context,
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Claude error: {str(e)}")
@@ -501,6 +610,7 @@ async def get_songs(request: Request, body: GenerateRequest):
                 "uri":          result["uri"],
                 "spotify_id":   result["spotify_id"],
                 "external_url": result["external_url"],
+                "reason":       song.get("reason", ""),
             })
         if len(found) >= song_count:
             break
