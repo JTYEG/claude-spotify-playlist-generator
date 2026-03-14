@@ -481,8 +481,8 @@ async def get_songs(request: Request, body: GenerateRequest):
     if not pool["candidates"]:
         raise HTTPException(status_code=502, detail="No candidates found on Last.fm for this seed")
 
-    # Ask Claude to rank 2× requested songs for Spotify verification fallback
-    rank_count = min(song_count * 2, len(pool["candidates"]))
+    # Cap at 20 — enough fallback buffer without inflating output tokens (5× cost vs input)
+    rank_count = min(20, len(pool["candidates"]))
     try:
         ranked = rank_candidates_with_claude(
             pool["seed"], pool["tags"], mode, description, pool["candidates"], count=rank_count
