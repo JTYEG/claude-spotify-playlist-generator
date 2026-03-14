@@ -57,47 +57,41 @@ MODE_PROMPTS = {
     "tight_match": """\
 Mode: tight_match
 
-Seed song: {SONG}
-Seed artist: {ARTIST}
+Playlist description: {PROMPT}
 
-Recommend {COUNT} songs that sound very similar to the seed.
+Recommend {COUNT} songs that sound very similar to this description.
 
-Stay close to the seed's sound, mood, instrumentation, production style, and energy level.
-Favor accuracy over discovery.
-
-Do not include the seed song.""",
+Stay close to the sound, mood, instrumentation, production style, and energy described.
+Favor accuracy over discovery.""",
 
     "adjacent_discovery": """\
 Mode: adjacent_discovery
 
-Seed song: {SONG}
-Seed artist: {ARTIST}
+Playlist description: {PROMPT}
 
-Recommend {COUNT} songs related to the seed.
+Recommend {COUNT} songs related to this description.
 
-Start close to the seed's sound, then explore outward into adjacent artists, genres, or scenes while remaining musically credible.
+Start close to the described sound, then explore outward into adjacent artists, genres, or scenes while remaining musically credible.
 
 Balance similarity with discovery.""",
 
     "influence_trail": """\
 Mode: influence_trail
 
-Seed song: {SONG}
-Seed artist: {ARTIST}
+Playlist description: {PROMPT}
 
 Recommend {COUNT} songs that help explain the musical influences behind this sound.
 
-Favor songs by artists that likely influenced the seed artist or share the stylistic lineage.""",
+Favor songs by artists that likely influenced the described artists or share the stylistic lineage.""",
 
     "left_field": """\
 Mode: left_field
 
-Seed song: {SONG}
-Seed artist: {ARTIST}
+Playlist description: {PROMPT}
 
-Recommend {COUNT} surprising songs inspired by the seed.
+Recommend {COUNT} surprising songs inspired by this description.
 
-Allow unexpected connections, but every recommendation must still make musical sense to someone who likes the seed.""",
+Allow unexpected connections, but every recommendation must still make musical sense to someone who likes the described music.""",
 }
 
 # ---------------------------------------------------------------------------
@@ -164,11 +158,11 @@ async def refresh_token_if_needed(session: dict) -> dict:
 # Claude helper
 # ---------------------------------------------------------------------------
 
-def get_songs_from_claude(seed_song: str, seed_artist: str, song_count: int = 15, mode: str = "adjacent_discovery") -> list[dict]:
+def get_songs_from_claude(prompt: str, song_count: int = 15, mode: str = "adjacent_discovery") -> list[dict]:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     template = MODE_PROMPTS.get(mode, MODE_PROMPTS["adjacent_discovery"])
     user_message = (
-        template.format(SONG=seed_song, ARTIST=seed_artist, COUNT=song_count)
+        template.format(PROMPT=prompt, COUNT=song_count)
         + "\n\nReturn the results as a JSON array with 'title' and 'artist' keys only. "
         "Make them well-known enough to be findable on Spotify. "
         "Do not repeat the same artist more than twice."
@@ -332,8 +326,7 @@ async def auth_logout(request: Request):
 # ---------------------------------------------------------------------------
 
 class GenerateRequest(BaseModel):
-    seed_song: str
-    seed_artist: str
+    prompt: str
     song_count: int = 15
     mode: str = "adjacent_discovery"
 
@@ -352,10 +345,9 @@ async def get_songs(request: Request, body: GenerateRequest):
     if not session:
         raise HTTPException(status_code=401, detail="Not logged in")
 
-    seed_song = body.seed_song.strip()
-    seed_artist = body.seed_artist.strip()
-    if not seed_song or not seed_artist:
-        raise HTTPException(status_code=400, detail="Seed song and artist are required")
+    prompt = body.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty")
 
     try:
         session = await refresh_token_if_needed(session)
@@ -367,7 +359,7 @@ async def get_songs(request: Request, body: GenerateRequest):
     mode = body.mode if body.mode in MODE_PROMPTS else "adjacent_discovery"
 
     try:
-        songs = get_songs_from_claude(seed_song, seed_artist, song_count, mode)
+        songs = get_songs_from_claude(prompt, song_count, mode)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Claude error: {str(e)}")
 

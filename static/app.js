@@ -15,9 +15,8 @@ const els = {
   btnSave:          $("btn-save"),
   btnRetry:         $("btn-retry"),
   welcomeText:      $("welcome-text"),
+  promptInput:      $("prompt-input"),
   promptError:      $("prompt-error"),
-  seedSong:         $("seed-song"),
-  seedArtist:       $("seed-artist"),
   songCount:        $("song-count"),
   songCountLabel:   $("song-count-label"),
   discoveryMode:    $("discovery-mode"),
@@ -43,8 +42,7 @@ const DISCOVERY_MODES = {
   4: { key: "left_field",         label: "Surprise",   desc: "Unexpected connections that still make musical sense. Anything goes." },
 };
 
-let lastSeedSong = "";
-let lastSeedArtist = "";
+let lastPrompt = "";
 let currentSongs = [];
 let currentUris = [];
 
@@ -107,7 +105,7 @@ function setState(state, payload = {}) {
 // Core actions
 // ---------------------------------------------------------------------------
 
-async function fetchSongs(seedSong, seedArtist) {
+async function fetchSongs(prompt) {
   setState(State.LOADING, { message: "Claude is picking songs and checking Spotify\u2026" });
   const song_count = parseInt(els.songCount.value, 10);
   const mode = DISCOVERY_MODES[els.discoveryMode.value]?.key ?? "adjacent_discovery";
@@ -115,7 +113,7 @@ async function fetchSongs(seedSong, seedArtist) {
     const resp = await fetch("/api/get-songs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ seed_song: seedSong, seed_artist: seedArtist, song_count, mode }),
+      body: JSON.stringify({ prompt, song_count, mode }),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -136,7 +134,7 @@ async function fetchSongs(seedSong, seedArtist) {
 async function savePlaylist() {
   setState(State.LOADING, { message: "Saving to Spotify\u2026" });
   const nameSuffix = els.playlistNameInput.value.trim();
-  const playlist_name = nameSuffix ? `AI Mix: ${nameSuffix}` : `AI Mix: ${lastSeedArtist} — ${lastSeedSong}`;
+  const playlist_name = nameSuffix ? `AI Mix: ${nameSuffix}` : `AI Mix: ${lastPrompt.slice(0, 50)}`;
   try {
     const resp = await fetch("/api/save-playlist", {
       method: "POST",
@@ -179,41 +177,37 @@ els.discoveryMode.addEventListener("input", () => {
 });
 
 els.btnGenerate.addEventListener("click", () => {
-  const seedSong = els.seedSong.value.trim();
-  const seedArtist = els.seedArtist.value.trim();
-  if (!seedSong || !seedArtist) {
+  const prompt = els.promptInput.value.trim();
+  if (!prompt) {
     els.promptError.classList.remove("hidden");
-    (seedSong ? els.seedArtist : els.seedSong).focus();
+    els.promptInput.focus();
     return;
   }
   els.promptError.classList.add("hidden");
-  lastSeedSong = seedSong;
-  lastSeedArtist = seedArtist;
-  fetchSongs(seedSong, seedArtist);
+  lastPrompt = prompt;
+  fetchSongs(prompt);
 });
 
 els.btnSave.addEventListener("click", () => savePlaylist());
 
 els.btnRegenerate.addEventListener("click", () => {
-  if (lastSeedSong && lastSeedArtist) fetchSongs(lastSeedSong, lastSeedArtist);
+  if (lastPrompt) fetchSongs(lastPrompt);
 });
 
 els.btnAnother.addEventListener("click", () => {
-  els.seedSong.value = "";
-  els.seedArtist.value = "";
+  els.promptInput.value = "";
   currentSongs = [];
   currentUris = [];
   setState(State.LOGGED_IN);
-  els.seedSong.focus();
+  els.promptInput.focus();
 });
 
 els.btnMakeAnother.addEventListener("click", () => {
-  els.seedSong.value = "";
-  els.seedArtist.value = "";
+  els.promptInput.value = "";
   currentSongs = [];
   currentUris = [];
   setState(State.LOGGED_IN);
-  els.seedSong.focus();
+  els.promptInput.focus();
 });
 
 els.btnRetry.addEventListener("click", () => setState(State.LOGGED_IN));

@@ -31,14 +31,13 @@
       <p class="welcome" id="welcome-text"></p>
 
       <div class="form-group">
-        <label for="seed-song">Song</label>
-        <input type="text" id="seed-song" placeholder="e.g. Bohemian Rhapsody" autocomplete="off" />
-      </div>
-
-      <div class="form-group">
-        <label for="seed-artist">Artist</label>
-        <input type="text" id="seed-artist" placeholder="e.g. Queen" autocomplete="off" />
-        <p class="error-msg hidden" id="prompt-error">Please enter both a song and artist.</p>
+        <label for="prompt-input">Describe your playlist</label>
+        <textarea
+          id="prompt-input"
+          rows="3"
+          placeholder="e.g. songs like Bohemian Rhapsody, late night lo-fi study vibes, 80s synth-pop..."
+        ></textarea>
+        <p class="error-msg hidden" id="prompt-error">Please enter a prompt first.</p>
       </div>
 
       <div class="slider-group discovery-group">
