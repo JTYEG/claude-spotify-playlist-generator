@@ -15,6 +15,7 @@ const els = {
   btnSave:          $("btn-save"),
   btnRetry:         $("btn-retry"),
   welcomeText:      $("welcome-text"),
+  seedInput:        $("seed-input"),
   promptInput:      $("prompt-input"),
   promptError:      $("prompt-error"),
   songCount:        $("song-count"),
@@ -109,11 +110,12 @@ async function fetchSongs(prompt) {
   setState(State.LOADING, { message: "Claude is picking songs and checking Spotify\u2026" });
   const song_count = parseInt(els.songCount.value, 10);
   const mode = DISCOVERY_MODES[els.discoveryMode.value]?.key ?? "adjacent_discovery";
+  const seed = els.seedInput.value.trim();
   try {
     const resp = await fetch("/api/get-songs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, song_count, mode }),
+      body: JSON.stringify({ prompt, seed, song_count, mode }),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -177,13 +179,14 @@ els.discoveryMode.addEventListener("input", () => {
 });
 
 els.btnGenerate.addEventListener("click", () => {
-  const prompt = els.promptInput.value.trim();
-  if (!prompt) {
+  const seed = els.seedInput.value.trim();
+  if (!seed) {
     els.promptError.classList.remove("hidden");
-    els.promptInput.focus();
+    els.seedInput.focus();
     return;
   }
   els.promptError.classList.add("hidden");
+  const prompt = els.promptInput.value.trim() || seed;
   lastPrompt = prompt;
   fetchSongs(prompt);
 });
@@ -195,19 +198,21 @@ els.btnRegenerate.addEventListener("click", () => {
 });
 
 els.btnAnother.addEventListener("click", () => {
+  els.seedInput.value = "";
   els.promptInput.value = "";
   currentSongs = [];
   currentUris = [];
   setState(State.LOGGED_IN);
-  els.promptInput.focus();
+  els.seedInput.focus();
 });
 
 els.btnMakeAnother.addEventListener("click", () => {
+  els.seedInput.value = "";
   els.promptInput.value = "";
   currentSongs = [];
   currentUris = [];
   setState(State.LOGGED_IN);
-  els.promptInput.focus();
+  els.seedInput.focus();
 });
 
 els.btnRetry.addEventListener("click", () => setState(State.LOGGED_IN));

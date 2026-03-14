@@ -31,13 +31,18 @@
       <p class="welcome" id="welcome-text"></p>
 
       <div class="form-group">
-        <label for="prompt-input">Describe your playlist</label>
+        <label for="seed-input">Seed <span class="label-hint">(artist or artist&nbsp;&mdash;&nbsp;track)</span></label>
+        <input type="text" id="seed-input" placeholder="e.g. Radiohead or Radiohead - Karma Police" autocomplete="off" />
+      </div>
+
+      <div class="form-group">
+        <label for="prompt-input">Description <span class="label-hint">(optional extra context)</span></label>
         <textarea
           id="prompt-input"
-          rows="3"
-          placeholder="e.g. songs like Bohemian Rhapsody, late night lo-fi study vibes, 80s synth-pop..."
+          rows="2"
+          placeholder="e.g. melancholic, late night, cinematic..."
         ></textarea>
-        <p class="error-msg hidden" id="prompt-error">Please enter a prompt first.</p>
+        <p class="error-msg hidden" id="prompt-error">Please enter a seed artist or track.</p>
       </div>
 
       <div class="slider-group discovery-group">

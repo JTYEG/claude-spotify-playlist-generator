@@ -156,6 +156,14 @@ header {
   margin-bottom: 8px;
 }
 
+.label-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
 textarea,
 input[type="text"] {
   width: 100%;

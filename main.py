@@ -20,11 +20,13 @@ SPOTIFY_CLIENT_ID = os.environ["SPOTIFY_CLIENT_ID"]
 SPOTIFY_CLIENT_SECRET = os.environ["SPOTIFY_CLIENT_SECRET"]
 SPOTIFY_REDIRECT_URI = os.environ["SPOTIFY_REDIRECT_URI"]
 SECRET_KEY = os.environ["SECRET_KEY"]
+LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "")
 
 SPOTIFY_SCOPES = "playlist-modify-public playlist-modify-private user-read-private user-read-email"
 SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+LASTFM_API_BASE = "https://ws.audioscrobbler.com/2.0/"
 
 app = FastAPI()
 signer = URLSafeTimedSerializer(SECRET_KEY)
@@ -155,15 +157,133 @@ async def refresh_token_if_needed(session: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Last.fm helpers
+# ---------------------------------------------------------------------------
+
+async def _lastfm(method: str, params: dict) -> dict:
+    if not LASTFM_API_KEY:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                LASTFM_API_BASE,
+                params={"method": method, "api_key": LASTFM_API_KEY, "format": "json", "autocorrect": 1, **params},
+            )
+        return resp.json() if resp.status_code == 200 else {}
+    except Exception:
+        return {}
+
+
+async def lastfm_similar_tracks(track: str, artist: str, limit: int = 10) -> list[str]:
+    data = await _lastfm("track.getSimilar", {"track": track, "artist": artist, "limit": limit})
+    tracks = data.get("similartracks", {}).get("track", [])
+    return [f"{t['name']} by {t['artist']['name']}" for t in tracks]
+
+
+async def lastfm_similar_artists(artist: str, limit: int = 10) -> list[str]:
+    data = await _lastfm("artist.getSimilar", {"artist": artist, "limit": limit})
+    artists = data.get("similarartists", {}).get("artist", [])
+    return [a["name"] for a in artists]
+
+
+async def lastfm_artist_top_tags(artist: str, limit: int = 6) -> list[str]:
+    data = await _lastfm("artist.getTopTags", {"artist": artist})
+    tags = data.get("toptags", {}).get("tag", [])[:limit]
+    return [t["name"] for t in tags]
+
+
+async def lastfm_track_top_tags(track: str, artist: str, limit: int = 6) -> list[str]:
+    data = await _lastfm("track.getTopTags", {"track": track, "artist": artist})
+    tags = data.get("toptags", {}).get("tag", [])[:limit]
+    return [t["name"] for t in tags]
+
+
+async def lastfm_artist_top_tracks(artist: str, limit: int = 10) -> list[str]:
+    data = await _lastfm("artist.getTopTracks", {"artist": artist, "limit": limit})
+    tracks = data.get("toptracks", {}).get("track", [])
+    return [t["name"] for t in tracks]
+
+
+async def build_lastfm_context(seed: str, mode: str) -> str:
+    if not seed or not LASTFM_API_KEY:
+        return ""
+
+    # Accept "Artist" or "Artist - Track"
+    parts = [p.strip() for p in seed.split(" - ", 1)]
+    artist = parts[0]
+    track = parts[1] if len(parts) > 1 else ""
+
+    import asyncio
+    lines = []
+
+    if mode == "tight_match":
+        if track:
+            similar_tracks, tags = await asyncio.gather(
+                lastfm_similar_tracks(track, artist),
+                lastfm_track_top_tags(track, artist),
+            )
+            if similar_tracks:
+                lines.append(f"Last.fm similar tracks to '{track}' by {artist}: {', '.join(similar_tracks)}")
+            if tags:
+                lines.append(f"Tags for '{track}': {', '.join(tags)}")
+        else:
+            similar_artists, tags = await asyncio.gather(
+                lastfm_similar_artists(artist),
+                lastfm_artist_top_tags(artist),
+            )
+            if similar_artists:
+                lines.append(f"Last.fm similar artists to {artist}: {', '.join(similar_artists)}")
+            if tags:
+                lines.append(f"Tags for {artist}: {', '.join(tags)}")
+
+    elif mode == "adjacent_discovery":
+        similar_artists, tags = await asyncio.gather(
+            lastfm_similar_artists(artist),
+            lastfm_artist_top_tags(artist),
+        )
+        if similar_artists:
+            lines.append(f"Last.fm similar artists to {artist}: {', '.join(similar_artists)}")
+        if tags:
+            lines.append(f"Genres/tags for {artist}: {', '.join(tags)}")
+
+    elif mode == "influence_trail":
+        similar_artists, tags, top_tracks = await asyncio.gather(
+            lastfm_similar_artists(artist),
+            lastfm_artist_top_tags(artist),
+            lastfm_artist_top_tracks(artist),
+        )
+        if similar_artists:
+            lines.append(f"Last.fm similar artists (use as influence clues): {', '.join(similar_artists)}")
+        if tags:
+            lines.append(f"Genres/tags for {artist}: {', '.join(tags)}")
+        if top_tracks:
+            lines.append(f"Top tracks by {artist}: {', '.join(top_tracks)}")
+
+    elif mode == "left_field":
+        similar_artists, tags = await asyncio.gather(
+            lastfm_similar_artists(artist),
+            lastfm_artist_top_tags(artist),
+        )
+        if tags:
+            lines.append(f"Genres/tags for {artist}: {', '.join(tags)}")
+        if similar_artists:
+            lines.append(f"Artists in same space as {artist} (use as loose inspiration only): {', '.join(similar_artists)}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Claude helper
 # ---------------------------------------------------------------------------
 
-def get_songs_from_claude(prompt: str, song_count: int = 15, mode: str = "adjacent_discovery") -> list[dict]:
+def get_songs_from_claude(prompt: str, song_count: int = 15, mode: str = "adjacent_discovery", lastfm_context: str = "") -> list[dict]:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     template = MODE_PROMPTS.get(mode, MODE_PROMPTS["adjacent_discovery"])
-    user_message = (
-        template.format(PROMPT=prompt, COUNT=song_count)
-        + "\n\nReturn the results as a JSON array with 'title' and 'artist' keys only. "
+    user_message = template.format(PROMPT=prompt, COUNT=song_count)
+    if lastfm_context:
+        user_message += f"\n\nLast.fm data to inform your recommendations:\n{lastfm_context}"
+    user_message += (
+        "\n\nReturn the results as a JSON array with 'title' and 'artist' keys only. "
         "Make them well-known enough to be findable on Spotify. "
         "Do not repeat the same artist more than twice."
     )
@@ -327,6 +447,7 @@ async def auth_logout(request: Request):
 
 class GenerateRequest(BaseModel):
     prompt: str
+    seed: str = ""
     song_count: int = 15
     mode: str = "adjacent_discovery"
 
@@ -357,9 +478,10 @@ async def get_songs(request: Request, body: GenerateRequest):
     access_token = session["access_token"]
     song_count = max(5, min(50, body.song_count))
     mode = body.mode if body.mode in MODE_PROMPTS else "adjacent_discovery"
+    lastfm_context = await build_lastfm_context(body.seed.strip(), mode)
 
     try:
-        songs = get_songs_from_claude(prompt, song_count, mode)
+        songs = get_songs_from_claude(prompt, song_count, mode, lastfm_context)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Claude error: {str(e)}")
 
