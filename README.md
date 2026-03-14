@@ -1,4 +1,5 @@
-# Spotify AI Playlist Generator
+<html> 
+  # Spotify AI Playlist Generator
 
 Generate Spotify playlists from natural language prompts using Claude AI. Describe a mood, artist, vibe, or any musical idea — Claude picks the songs, Spotify builds the playlist.
 
@@ -112,6 +113,8 @@ So *"songs like Bohemian Rhapsody"* in **Similar** mode returns tracks that feel
 ├── .env.example         # Environment variable template
 └── Procfile             # For Render/Heroku deployment
 ```
+
+</html> 
 
 ## License
 
