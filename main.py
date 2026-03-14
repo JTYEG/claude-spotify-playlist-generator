@@ -168,7 +168,7 @@ def get_songs_from_claude(prompt: str, song_count: int = 15, mode: str = "adjace
         "Do not repeat the same artist more than twice."
     )
     response = client.messages.create(
-        model="claude-sonnet-4-6",
+        model="claude-haiku-4-5-20251001",
         max_tokens=1024,
         system=CLAUDE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_message}],
