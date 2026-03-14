@@ -1,5 +1,7 @@
+import asyncio
 import json
 import os
+import re
 import secrets
 import time
 from urllib.parse import urlencode
@@ -31,69 +33,26 @@ LASTFM_API_BASE = "https://ws.audioscrobbler.com/2.0/"
 app = FastAPI()
 signer = URLSafeTimedSerializer(SECRET_KEY)
 
-CLAUDE_SYSTEM_PROMPT = """You are a music recommendation engine.
+CLAUDE_SYSTEM_PROMPT = """You are a music ranking engine.
 
-Recommend songs based on the user's requested mode and seed.
+You will receive a seed track with tags, a discovery mode, and a numbered list of candidate tracks sourced from Last.fm.
 
-Prioritize:
-1. sonic similarity
-2. mood and atmosphere
-3. instrumentation and production
-4. genre/subgenre fit
-5. historical or stylistic lineage only when it improves the musical match
+Your task: select and rank the best tracks from the provided candidates only.
 
 Rules:
-- Avoid duplicates.
-- Avoid more than 2 songs by the same artist unless requested.
-- Prefer musically credible recommendations over generic obvious picks.
-- Return ONLY a JSON array.
-- Each item must contain:
- 
+- ONLY use tracks from the numbered candidate list. Never invent or add songs not in the list.
+- Do not include the seed track itself.
+- Do not repeat the same artist more than twice.
+- Return ONLY a raw JSON array with 'title' and 'artist' keys, ranked best first.
+- No explanations, no markdown, no code blocks — just the JSON array.
 
-Then return the best matches.
+Example: [{"title": "Blue Monday", "artist": "New Order"}]"""
 
-CRITICAL: Respond with ONLY a JSON array. Each item has 'title' and 'artist' keys. No explanations, no markdown, no code blocks — just the raw JSON array.
-Example: [{"title": "Piano Man", "artist": "Billy Joel"}]"""
-
-MODE_PROMPTS = {
-    "tight_match": """\
-Mode: tight_match
-
-Playlist description: {PROMPT}
-
-Recommend {COUNT} songs that sound very similar to this description.
-
-Stay close to the sound, mood, instrumentation, production style, and energy described.
-Favor accuracy over discovery.""",
-
-    "adjacent_discovery": """\
-Mode: adjacent_discovery
-
-Playlist description: {PROMPT}
-
-Recommend {COUNT} songs related to this description.
-
-Start close to the described sound, then explore outward into adjacent artists, genres, or scenes while remaining musically credible.
-
-Balance similarity with discovery.""",
-
-    "influence_trail": """\
-Mode: influence_trail
-
-Playlist description: {PROMPT}
-
-Recommend {COUNT} songs that help explain the musical influences behind this sound.
-
-Favor songs by artists that likely influenced the described artists or share the stylistic lineage.""",
-
-    "left_field": """\
-Mode: left_field
-
-Playlist description: {PROMPT}
-
-Recommend {COUNT} surprising songs inspired by this description.
-
-Allow unexpected connections, but every recommendation must still make musical sense to someone who likes the described music.""",
+RANK_MODE_INSTRUCTIONS = {
+    "tight_match":        "Rank by closest sonic and mood similarity to the seed. Prioritize tracks that feel nearly identical in style, energy, and production.",
+    "adjacent_discovery": "Rank balancing similarity with variety. Mix close matches with interesting adjacent picks across different artists and subgenres.",
+    "influence_trail":    "Prioritize tracks that represent the musical lineage and influences behind the seed's style.",
+    "left_field":         "Prioritize the most unexpected but musically defensible picks. Favour surprising connections that still make sense to fans of the seed.",
 }
 
 # ---------------------------------------------------------------------------
@@ -174,174 +133,139 @@ async def _lastfm(method: str, params: dict) -> dict:
         return {}
 
 
-async def lastfm_similar_tracks(track: str, artist: str, limit: int = 10) -> list[str]:
+def _normalize_key(title: str, artist: str) -> str:
+    """Lowercase + strip punctuation for deduplication."""
+    def clean(s):
+        return re.sub(r"[^\w\s]", "", s.lower()).strip()
+    return f"{clean(artist)}||{clean(title)}"
+
+
+async def _lfm_track_info(track: str, artist: str) -> dict | None:
+    data = await _lastfm("track.getInfo", {"track": track, "artist": artist})
+    t = data.get("track")
+    if not t:
+        return None
+    a = t.get("artist", {})
+    return {
+        "title": t["name"],
+        "artist": a["name"] if isinstance(a, dict) else str(a),
+    }
+
+
+async def _lfm_similar_tracks(track: str, artist: str, limit: int = 20) -> list[dict]:
     data = await _lastfm("track.getSimilar", {"track": track, "artist": artist, "limit": limit})
     tracks = data.get("similartracks", {}).get("track", [])
-    return [f"{t['name']} by {t['artist']['name']}" for t in tracks]
+    return [{"title": t["name"], "artist": t["artist"]["name"]} for t in tracks]
 
 
-async def lastfm_similar_artists(artist: str, limit: int = 10) -> list[str]:
-    data = await _lastfm("artist.getSimilar", {"artist": artist, "limit": limit})
-    artists = data.get("similarartists", {}).get("artist", [])
-    return [a["name"] for a in artists]
-
-
-async def lastfm_artist_top_tags(artist: str, limit: int = 6) -> list[str]:
-    data = await _lastfm("artist.getTopTags", {"artist": artist})
-    tags = data.get("toptags", {}).get("tag", [])[:limit]
-    return [t["name"] for t in tags]
-
-
-async def lastfm_track_top_tags(track: str, artist: str, limit: int = 6) -> list[str]:
+async def _lfm_track_top_tags(track: str, artist: str, limit: int = 6) -> list[str]:
     data = await _lastfm("track.getTopTags", {"track": track, "artist": artist})
     tags = data.get("toptags", {}).get("tag", [])[:limit]
     return [t["name"] for t in tags]
 
 
-async def lastfm_artist_top_tracks(artist: str, limit: int = 10) -> list[str]:
-    data = await _lastfm("artist.getTopTracks", {"artist": artist, "limit": limit})
-    tracks = data.get("toptracks", {}).get("track", [])
-    return [t["name"] for t in tracks]
-
-
-async def lastfm_tag_top_artists(tag: str, limit: int = 8) -> list[str]:
-    data = await _lastfm("tag.gettopartists", {"tag": tag, "limit": limit})
-    artists = data.get("topartists", {}).get("artist", [])
+async def _lfm_similar_artists(artist: str, limit: int = 10) -> list[str]:
+    data = await _lastfm("artist.getSimilar", {"artist": artist, "limit": limit})
+    artists = data.get("similarartists", {}).get("artist", [])
     return [a["name"] for a in artists]
 
 
-async def lastfm_tag_top_tracks(tag: str, limit: int = 8) -> list[str]:
-    data = await _lastfm("tag.gettoptracks", {"tag": tag, "limit": limit})
-    tracks = data.get("tracks", {}).get("track", [])
-    return [f"{t['name']} by {t['artist']['name']}" for t in tracks]
+async def _lfm_artist_top_tags(artist: str, limit: int = 6) -> list[str]:
+    data = await _lastfm("artist.getTopTags", {"artist": artist})
+    tags = data.get("toptags", {}).get("tag", [])[:limit]
+    return [t["name"] for t in tags]
 
 
-_STYLE_STOPWORDS = {
-    "but", "more", "and", "or", "style", "feel", "vibe", "vibes", "with",
-    "like", "in", "the", "a", "an", "i", "want", "something", "bit", "of",
-    "some", "very", "really", "kind", "sort", "type", "feel", "sounds",
-}
+async def _lfm_artist_top_tracks(artist: str, limit: int = 2) -> list[dict]:
+    data = await _lastfm("artist.getTopTracks", {"artist": artist, "limit": limit})
+    tracks = data.get("toptracks", {}).get("track", [])
+    return [{"title": t["name"], "artist": artist} for t in tracks]
 
-async def extract_style_context(description: str) -> str:
-    """Try words/phrases from the description as Last.fm tags, return enrichment for any that match."""
-    if not description:
-        return ""
-    import re
-    # Split on commas, "but", "and" to get candidate phrases
-    raw = re.split(r"[,]|\bbut\b|\band\b", description.lower())
-    candidates = []
-    for phrase in raw:
-        cleaned = phrase.strip()
-        # Remove leading filler words
-        cleaned = re.sub(r"^\s*(more|bit of|a bit|very|really|something|in a|with a|with)\s+", "", cleaned).strip()
-        if cleaned and cleaned not in _STYLE_STOPWORDS and len(cleaned) > 2:
-            candidates.append(cleaned)
 
-    lines = []
-    import asyncio
-    for candidate in candidates[:3]:  # try up to 3 candidates
-        artists, tracks = await asyncio.gather(
-            lastfm_tag_top_artists(candidate),
-            lastfm_tag_top_tracks(candidate),
+async def build_candidate_pool(seed_track: str, seed_artist: str) -> dict:
+    """Full pipeline: normalize → similar tracks + tags → similar artists → their top tracks → dedupe pool."""
+
+    # 1. Normalize via track.getInfo
+    info = await _lfm_track_info(seed_track, seed_artist)
+    norm_track  = info["title"]  if info else seed_track
+    norm_artist = info["artist"] if info else seed_artist
+
+    if seed_track:
+        # 2 & 3. Similar tracks + track tags in parallel
+        similar_tracks, tags = await asyncio.gather(
+            _lfm_similar_tracks(norm_track, norm_artist, limit=20),
+            _lfm_track_top_tags(norm_track, norm_artist),
         )
-        if artists:
-            lines.append(f"Top artists tagged '{candidate}': {', '.join(artists)}")
-        if tracks:
-            lines.append(f"Top tracks tagged '{candidate}': {', '.join(tracks)}")
-        if artists or tracks:
-            break  # one good tag match is enough
+    else:
+        similar_tracks = []
+        tags = await _lfm_artist_top_tags(norm_artist)
 
-    return "\n".join(lines)
+    # 4. Similar artists
+    similar_artists = await _lfm_similar_artists(norm_artist, limit=10)
 
-
-async def build_lastfm_context(seed: str, mode: str, description: str = "") -> str:
-    if not seed or not LASTFM_API_KEY:
-        return ""
-
-    # Accept "Artist" or "Artist - Track"
-    parts = [p.strip() for p in seed.split(" - ", 1)]
-    artist = parts[0]
-    track = parts[1] if len(parts) > 1 else ""
-
-    import asyncio
-    lines = []
-
-    if mode == "tight_match":
-        if track:
-            similar_tracks, tags = await asyncio.gather(
-                lastfm_similar_tracks(track, artist),
-                lastfm_track_top_tags(track, artist),
-            )
-            if similar_tracks:
-                lines.append(f"Last.fm similar tracks to '{track}' by {artist}: {', '.join(similar_tracks)}")
-            if tags:
-                lines.append(f"Tags for '{track}': {', '.join(tags)}")
-        else:
-            similar_artists, tags = await asyncio.gather(
-                lastfm_similar_artists(artist),
-                lastfm_artist_top_tags(artist),
-            )
-            if similar_artists:
-                lines.append(f"Last.fm similar artists to {artist}: {', '.join(similar_artists)}")
-            if tags:
-                lines.append(f"Tags for {artist}: {', '.join(tags)}")
-
-    elif mode == "adjacent_discovery":
-        similar_artists, tags = await asyncio.gather(
-            lastfm_similar_artists(artist),
-            lastfm_artist_top_tags(artist),
-        )
-        if similar_artists:
-            lines.append(f"Last.fm similar artists to {artist}: {', '.join(similar_artists)}")
-        if tags:
-            lines.append(f"Genres/tags for {artist}: {', '.join(tags)}")
-
-    elif mode == "influence_trail":
-        similar_artists, tags, top_tracks = await asyncio.gather(
-            lastfm_similar_artists(artist),
-            lastfm_artist_top_tags(artist),
-            lastfm_artist_top_tracks(artist),
-        )
-        if similar_artists:
-            lines.append(f"Last.fm similar artists (use as influence clues): {', '.join(similar_artists)}")
-        if tags:
-            lines.append(f"Genres/tags for {artist}: {', '.join(tags)}")
-        if top_tracks:
-            lines.append(f"Top tracks by {artist}: {', '.join(top_tracks)}")
-
-    elif mode == "left_field":
-        similar_artists, tags = await asyncio.gather(
-            lastfm_similar_artists(artist),
-            lastfm_artist_top_tags(artist),
-        )
-        if tags:
-            lines.append(f"Genres/tags for {artist}: {', '.join(tags)}")
-        if similar_artists:
-            lines.append(f"Artists in same space as {artist} (use as loose inspiration only): {', '.join(similar_artists)}")
-
-    # Style enrichment from description (e.g. "but more electronic", "jazz feel")
-    style_context = await extract_style_context(description)
-    if style_context:
-        lines.append(style_context)
-
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Claude helper
-# ---------------------------------------------------------------------------
-
-def get_songs_from_claude(prompt: str, song_count: int = 15, mode: str = "adjacent_discovery", lastfm_context: str = "") -> list[dict]:
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    template = MODE_PROMPTS.get(mode, MODE_PROMPTS["adjacent_discovery"])
-    user_message = template.format(PROMPT=prompt, COUNT=song_count)
-    if lastfm_context:
-        user_message += f"\n\nLast.fm data to inform your recommendations:\n{lastfm_context}"
-    user_message += (
-        "\n\nReturn the results as a JSON array with 'title' and 'artist' keys only. "
-        "Make them well-known enough to be findable on Spotify. "
-        "Do not repeat the same artist more than twice."
+    # 5. Top 2 tracks for each similar artist
+    artist_track_lists = await asyncio.gather(
+        *[_lfm_artist_top_tracks(a, limit=2) for a in similar_artists]
     )
+
+    # 6. Merge all candidate tracks
+    all_candidates: list[dict] = list(similar_tracks)
+    for track_list in artist_track_lists:
+        all_candidates.extend(track_list)
+
+    # 7. Deduplicate, excluding the seed itself
+    seed_key = _normalize_key(norm_track, norm_artist)
+    seen = {seed_key}
+    unique: list[dict] = []
+    for c in all_candidates:
+        key = _normalize_key(c["title"], c["artist"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(c)
+
+    # 8. Limit pool to 40
+    return {
+        "seed":       {"title": norm_track, "artist": norm_artist},
+        "tags":       tags,
+        "candidates": unique[:40],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Claude helper — ranks provided candidates, never invents songs
+# ---------------------------------------------------------------------------
+
+def rank_candidates_with_claude(
+    seed: dict,
+    tags: list[str],
+    mode: str,
+    description: str,
+    candidates: list[dict],
+    count: int,
+) -> list[dict]:
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    candidate_lines = "\n".join(
+        f"{i + 1}. {c['title']} by {c['artist']}" for i, c in enumerate(candidates)
+    )
+    mode_instruction = RANK_MODE_INSTRUCTIONS.get(mode, RANK_MODE_INSTRUCTIONS["adjacent_discovery"])
+    tag_str = ", ".join(tags) if tags else "unknown"
+
+    user_message = (
+        f"Seed track: {seed['title']} by {seed['artist']}\n"
+        f"Tags: {tag_str}\n"
+        f"Mode: {mode}\n"
+        f"Ranking instruction: {mode_instruction}\n"
+    )
+    if description:
+        user_message += f"Additional context: {description}\n"
+    user_message += (
+        f"\nCandidate tracks (select ONLY from this list):\n{candidate_lines}\n\n"
+        f"Return the best {count} tracks from the candidates above as a JSON array "
+        "with 'title' and 'artist' keys, ranked best first. "
+        "Do not include any tracks not in the list. Do not include the seed track."
+    )
+
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=1024,
@@ -349,7 +273,6 @@ def get_songs_from_claude(prompt: str, song_count: int = 15, mode: str = "adjace
         messages=[{"role": "user", "content": user_message}],
     )
     content = response.content[0].text.strip()
-    # Strip markdown fences if present
     if content.startswith("```"):
         parts = content.split("```")
         content = parts[1]
@@ -501,8 +424,8 @@ async def auth_logout(request: Request):
 # ---------------------------------------------------------------------------
 
 class GenerateRequest(BaseModel):
-    prompt: str
-    seed: str = ""
+    seed: str                          # "Artist" or "Artist - Track"
+    prompt: str = ""                   # optional extra context for ranking
     song_count: int = 15
     mode: str = "adjacent_discovery"
 
@@ -514,16 +437,14 @@ class SaveRequest(BaseModel):
 
 @app.post("/api/get-songs")
 async def get_songs(request: Request, body: GenerateRequest):
-    """Step 1: Ask Claude for songs, verify on Spotify, return only found tracks."""
-    import asyncio
-
+    """Pipeline: Last.fm candidates → Claude ranking → Spotify verification."""
     session = get_session(request)
     if not session:
         raise HTTPException(status_code=401, detail="Not logged in")
 
-    prompt = body.prompt.strip()
-    if not prompt:
-        raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+    seed = body.seed.strip()
+    if not seed:
+        raise HTTPException(status_code=400, detail="Seed is required")
 
     try:
         session = await refresh_token_if_needed(session)
@@ -532,26 +453,48 @@ async def get_songs(request: Request, body: GenerateRequest):
 
     access_token = session["access_token"]
     song_count = max(5, min(50, body.song_count))
-    mode = body.mode if body.mode in MODE_PROMPTS else "adjacent_discovery"
-    lastfm_context = await build_lastfm_context(body.seed.strip(), mode, prompt)
+    mode = body.mode if body.mode in RANK_MODE_INSTRUCTIONS else "adjacent_discovery"
+    description = body.prompt.strip()
 
+    # Parse seed: "Artist" or "Artist - Track"
+    parts = [p.strip() for p in seed.split(" - ", 1)]
+    seed_artist = parts[0]
+    seed_track  = parts[1] if len(parts) > 1 else ""
+
+    # Build Last.fm candidate pool
     try:
-        songs = get_songs_from_claude(prompt, song_count, mode, lastfm_context)
+        pool = await build_candidate_pool(seed_track, seed_artist)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Last.fm error: {str(e)}")
+
+    if not pool["candidates"]:
+        raise HTTPException(status_code=502, detail="No candidates found on Last.fm for this seed")
+
+    # Claude ranks from candidates only — ask for extra buffer to cover Spotify misses
+    rank_count = min(len(pool["candidates"]), song_count * 2)
+    try:
+        ranked = rank_candidates_with_claude(
+            pool["seed"], pool["tags"], mode, description, pool["candidates"], rank_count
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Claude error: {str(e)}")
 
-    search_results = await asyncio.gather(
-        *[search_track(s["title"], s["artist"], access_token) for s in songs],
+    # Verify all ranked tracks on Spotify in parallel
+    uris = await asyncio.gather(
+        *[search_track(s["title"], s["artist"], access_token) for s in ranked],
         return_exceptions=True,
     )
 
+    # Walk ranked list in order, keep first song_count verified tracks
     found = []
-    for song, uri in zip(songs, search_results):
+    for song, uri in zip(ranked, uris):
         if uri and isinstance(uri, str):
             found.append({"title": song["title"], "artist": song["artist"], "uri": uri})
+        if len(found) >= song_count:
+            break
 
     if not found:
-        raise HTTPException(status_code=502, detail="No tracks found on Spotify for any of Claude's suggestions")
+        raise HTTPException(status_code=502, detail="No tracks found on Spotify from the ranked candidates")
 
     response = JSONResponse({"songs": found})
     set_session(response, session)
