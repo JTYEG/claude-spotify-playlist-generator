@@ -9,12 +9,21 @@ Generate Spotify playlists from a seed track or artist using Claude AI and Last.
 
 ## What it does
 
-1. Enter a seed — an artist (e.g. `Radiohead`) or a specific track (e.g. `Soft Cell - Tainted Love`)
+1. Enter a seed — an artist (`Radiohead`), a track (`Soft Cell - Tainted Love`), a blend (`Radiohead + Aphex Twin`), or a mood description (`late night melancholic electronic`)
 2. Pick a discovery mode to control how adventurous the recommendations are
 3. Last.fm fetches real similar tracks, similar artists, and genre tags for the seed
 4. Claude AI ranks the best matches from the candidate pool — it cannot invent songs
 5. Each track is verified on Spotify before being included
 6. Preview the list, name the playlist, and save it to your Spotify account
+
+## Features
+
+- **4 discovery modes** — Similar, Explore, Influences, Surprise
+- **Blend mode** — combine two artists (e.g. `Radiohead + Aphex Twin`) to find the sonic overlap
+- **Mood-only mode** — no seed required, describe a feeling or vibe and Claude builds the pool from Last.fm genre tags
+- **Show reasons** — optional toggle to show why each track was picked
+- **Token display** — shows Claude input/output token counts per generation
+- **Spotify-verified results** — every track is confirmed to exist on Spotify before being shown
 
 ## Discovery modes
 
