@@ -19,6 +19,7 @@ const els = {
   promptInput:      $("prompt-input"),
   promptError:      $("prompt-error"),
   showReasons:      $("show-reasons"),
+  tokenInfo:        $("token-info"),
   songCount:        $("song-count"),
   songCountLabel:   $("song-count-label"),
   discoveryMode:    $("discovery-mode"),
@@ -128,6 +129,11 @@ async function fetchSongs(prompt) {
     }
     currentSongs = data.songs;
     currentUris = data.songs.map(s => s.uri);
+    if (data.debug && els.tokenInfo) {
+      const d = data.debug;
+      els.tokenInfo.textContent = `↑ ${d.input_tokens} in  ↓ ${d.output_tokens} out  (${d.total_tokens} total)`;
+      els.tokenInfo.classList.remove("hidden");
+    }
     setState(State.PREVIEW, { songs: currentSongs });
   } catch {
     setState(State.ERROR, { message: "Network error — please check your connection and try again." });
@@ -165,6 +171,12 @@ async function savePlaylist() {
 // ---------------------------------------------------------------------------
 // Event handlers
 // ---------------------------------------------------------------------------
+
+els.showReasons.addEventListener("change", () => {
+  const status = document.getElementById("reasons-status");
+  status.textContent = els.showReasons.checked ? "ON" : "OFF";
+  status.style.color = els.showReasons.checked ? "var(--green)" : "var(--error)";
+});
 
 els.btnLogin.addEventListener("click", () => { window.location.href = "/auth/login"; });
 els.btnLogout.addEventListener("click", () => { window.location.href = "/auth/logout"; });

@@ -246,6 +246,13 @@ input[type="text"]::placeholder {
   letter-spacing: 1px;
 }
 
+.token-info {
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.6;
+  margin: -4px 0 8px;
+}
+
 .result-name {
   font-size: 18px;
   font-weight: 700;

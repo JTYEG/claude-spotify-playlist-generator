@@ -65,7 +65,7 @@
       <div class="toggle-group">
         <label class="toggle-label">
           <input type="checkbox" id="show-reasons" />
-          <span>Show why each track was picked</span>
+          <span>Show why each track was picked — <span id="reasons-status" style="color:var(--error);font-weight:700;">OFF</span></span>
         </label>
       </div>
 
@@ -82,6 +82,7 @@
       <!-- PREVIEW STATE -->
       <div id="section-preview" class="hidden preview-card">
         <p class="result-label">Claude's picks — looking good?</p>
+        <p id="token-info" class="token-info hidden"></p>
         <ol id="preview-list" class="song-list"></ol>
         <div class="playlist-name-group">
           <label for="playlist-name-input">Playlist name</label>

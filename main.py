@@ -57,10 +57,10 @@ Rules:
 - ONLY use tracks from candidate_tracks. Never invent or add songs not in the list.
 - Do not include the seed track itself.
 - Do not repeat the same artist more than twice.
-- For each track include a "reason" field: 3-5 words explaining why it fits.
-- Return ONLY valid JSON. No explanations, no markdown, no code blocks.
+- For each track include a "reason" field: exactly 3-4 words, no quotes, no apostrophes, no special characters.
+- Return ONLY compact valid JSON on a single line. No whitespace, no markdown, no code blocks.
 
-Example output: {"ranked_tracks": [{"artist": "New Order", "track": "Blue Monday", "reason": "icy synth, cold energy"}]}"""
+Example output: {"ranked_tracks": [{"artist": "New Order", "track": "Blue Monday", "reason": "icy cold synth"}]}"""
 
 RANK_MODE_INSTRUCTIONS = {
     "tight_match":        "Rank by closest sonic and mood similarity to the seed. Prioritize tracks that feel nearly identical in style, energy, and production.",
@@ -388,18 +388,26 @@ def rank_candidates_with_claude(
 
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=600,
+        max_tokens=600 if not show_reasons else 1200,
         system=CLAUDE_SYSTEM_PROMPT_WITH_REASONS if show_reasons else CLAUDE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": json.dumps(payload)}],
     )
+    usage = {"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}
     content = response.content[0].text.strip()
     if content.startswith("```"):
         parts = content.split("```")
         content = parts[1]
         if content.startswith("json"):
             content = content[4:]
-    result = json.loads(content.strip())
-    return result.get("ranked_tracks", result) if isinstance(result, dict) else result
+    try:
+        result = json.loads(content.strip())
+    except json.JSONDecodeError:
+        cut = content.rfind("},")
+        if cut != -1:
+            content = content[:cut + 1] + "]}"
+        result = json.loads(content.strip())
+    tracks = result.get("ranked_tracks", result) if isinstance(result, dict) else result
+    return tracks, usage
 
 
 # ---------------------------------------------------------------------------
@@ -568,7 +576,6 @@ async def get_songs(request: Request, body: GenerateRequest):
     session = get_session(request)
     if not session:
         raise HTTPException(status_code=401, detail="Not logged in")
-
     seed = body.seed.strip()
     description = body.prompt.strip()
 
@@ -607,7 +614,7 @@ async def get_songs(request: Request, body: GenerateRequest):
     )
 
     try:
-        ranked = rank_candidates_with_claude(
+        ranked, claude_usage = rank_candidates_with_claude(
             pool["seed"], pool["tags"], mode, description, pool["candidates"],
             count=rank_count, blend_context=blend_context, show_reasons=body.show_reasons,
         )
@@ -643,6 +650,9 @@ async def get_songs(request: Request, body: GenerateRequest):
             "candidates_built": len(pool["candidates"]),
             "ranked_count":     len(ranked),
             "verified_count":   len(found),
+            "input_tokens":     claude_usage["input_tokens"],
+            "output_tokens":    claude_usage["output_tokens"],
+            "total_tokens":     claude_usage["input_tokens"] + claude_usage["output_tokens"],
         },
     })
     set_session(response, session)
