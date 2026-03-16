@@ -1,26 +1,26 @@
- 
- # Claude Spotify Playlist Generator
+# Claude Spotify Playlist Generator
 
-Generate Spotify playlists from a seed track or artist using Claude AI and Last.fm. Enter a song or artist, pick a discovery mode, and get a verified playlist saved directly to your Spotify account.
-
-<p align="center">
-  <img src="docs/screenshot.png" alt="App screenshot" />
-</p>
+Generate Spotify playlists from a seed track, artist, genre, or mood using Claude AI and Last.fm. Preview the tracks, name your playlist, and save it directly to your Spotify account.
 
 ## What it does
 
 1. Enter a seed — an artist (`Radiohead`), a track (`Soft Cell - Tainted Love`), a blend (`Radiohead + Aphex Twin`), or a mood description (`late night melancholic electronic`)
-2. Pick a discovery mode to control how adventurous the recommendations are
-3. Last.fm fetches real similar tracks, similar artists, and genre tags for the seed
-4. Claude AI ranks the best matches from the candidate pool — it cannot invent songs
-5. Each track is verified on Spotify before being included
-6. Preview the list, name the playlist, and save it to your Spotify account
+2. Genre pills appear automatically — click one or two to generate by genre instead
+3. Hit **▶ Now playing** to pull your currently playing Spotify track as the seed
+4. Pick a discovery mode to control how adventurous the recommendations are
+5. Last.fm fetches real similar tracks, similar artists, and genre tags for the seed
+6. Claude AI ranks the best matches from the candidate pool — it cannot invent songs
+7. Each track is verified on Spotify before being included
+8. Preview the list, name the playlist, and save it to your Spotify account
 
 ## Features
 
 - **4 discovery modes** — Similar, Explore, Influences, Surprise
-- **Blend mode** — combine two artists (e.g. `Radiohead + Aphex Twin`) to find the sonic overlap
-- **Mood-only mode** — no seed required, describe a feeling or vibe and Claude builds the pool from Last.fm genre tags
+- **Artist blend** — combine two artists (e.g. `Radiohead + Aphex Twin`) to find the sonic overlap
+- **Genre discovery** — type an artist, click a genre pill, generate a playlist from that genre
+- **Genre blend** — select two genre pills to merge both pools into one playlist
+- **Now Playing** — one click to use your currently playing Spotify track as the seed
+- **Mood-only mode** — no seed required, describe a feeling or vibe
 - **Show reasons** — optional toggle to show why each track was picked
 - **Token display** — shows Claude input/output token counts per generation
 - **Spotify-verified results** — every track is confirmed to exist on Spotify before being shown
@@ -37,16 +37,18 @@ Generate Spotify playlists from a seed track or artist using Claude AI and Last.
 ## How the pipeline works
 
 ```
-Seed (artist + optional track)
+Seed (artist, track, genre, or mood)
         │
         ▼
 Last.fm ──► track.getSimilar      (up to 25 similar tracks)
         ├── track.getTopTags      (genre/mood tags)
         ├── artist.getSimilar     (up to 10 similar artists)
-        └── artist.getTopTracks  (top 3 tracks per similar artist)
+        ├── artist.getTopTracks   (top tracks per similar artist)
+        ├── tag.getTopArtists     (for genre mode)
+        └── tag.getTopTracks      (for genre mode)
         │
         ▼
-Candidate pool (30–40 tracks, deduplicated)
+Candidate pool (up to 40 tracks, deduplicated)
         │
         ▼
 Claude Haiku ──► ranks top 20 candidates by mode
@@ -55,7 +57,7 @@ Claude Haiku ──► ranks top 20 candidates by mode
 Spotify search ──► verifies each track sequentially
         │
         ▼
-First 15 verified tracks → saved as playlist
+Verified tracks → preview → save as playlist
 ```
 
 Claude only selects from the Last.fm candidate pool — it cannot hallucinate or invent songs.
@@ -135,8 +137,6 @@ See [DEPLOY.md](DEPLOY.md) for instructions on deploying to Render.
 │   ├── index.html       # Single-page UI
 │   ├── app.js           # Frontend logic
 │   └── style.css        # Styles
-├── docs/
-│   └── screenshot.png   # App screenshot
 ├── requirements.txt
 ├── .env.example         # Environment variable template
 └── Procfile             # For Render deployment
