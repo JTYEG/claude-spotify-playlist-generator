@@ -459,6 +459,50 @@ input[type="text"]::placeholder {
   padding: 10px 14px 10px 4px;
 }
 
+/* Seed label row with now-playing button */
+.seed-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.seed-label-row label {
+  margin-bottom: 0;
+}
+
+.btn-now-playing {
+  background: transparent;
+  border: none;
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  letter-spacing: 0.3px;
+  opacity: 0.8;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.btn-now-playing:hover {
+  opacity: 1;
+}
+
+.btn-now-playing:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Genre blend hint */
+.genre-blend-hint {
+  font-size: 12px;
+  color: var(--green);
+  margin-top: 6px;
+  font-style: italic;
+  opacity: 0.8;
+}
+
 /* Genre pills */
 .genre-pills {
   display: flex;

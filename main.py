@@ -24,7 +24,7 @@ SPOTIFY_REDIRECT_URI = os.environ["SPOTIFY_REDIRECT_URI"]
 SECRET_KEY = os.environ["SECRET_KEY"]
 LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "")
 
-SPOTIFY_SCOPES = "playlist-modify-public playlist-modify-private user-read-private user-read-email"
+SPOTIFY_SCOPES = "playlist-modify-public playlist-modify-private user-read-private user-read-email user-read-currently-playing user-read-playback-state"
 SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
@@ -358,6 +358,25 @@ async def build_genre_pool(tag: str) -> dict:
     }
 
 
+async def build_multi_genre_pool(tag1: str, tag2: str) -> dict:
+    """Blend two genre tags into a single candidate pool."""
+    pool1, pool2 = await asyncio.gather(build_genre_pool(tag1), build_genre_pool(tag2))
+    all_candidates = list(pool1["candidates"]) + list(pool2["candidates"])
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for c in all_candidates:
+        key = _normalize_key(c["track"], c["artist"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(c)
+    candidates = _unique_by_artist_limit(unique, max_per_artist=2)[:40]
+    return {
+        "seed":       {"track": "", "artist": f"{tag1} + {tag2}"},
+        "tags":       [tag1, tag2],
+        "candidates": candidates,
+    }
+
+
 async def build_blend_pool(seed1: str, seed2: str) -> dict:
     """Blend pipeline: run both seeds in parallel, merge candidate pools."""
     pool1, pool2 = await asyncio.gather(build_seed_pool(seed1), build_seed_pool(seed2))
@@ -582,6 +601,34 @@ async def get_artist_tags(artist: str):
     return JSONResponse({"tags": tags})
 
 
+@app.get("/api/now-playing")
+async def now_playing(request: Request):
+    """Return the user's currently playing Spotify track."""
+    session = get_session(request)
+    if not session:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    try:
+        session = await refresh_token_if_needed(session)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Could not refresh token")
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{SPOTIFY_API_BASE}/me/player/currently-playing",
+            headers={"Authorization": f"Bearer {session['access_token']}"},
+        )
+    if resp.status_code == 204 or resp.status_code != 200:
+        return JSONResponse({"playing": False})
+    data = resp.json()
+    item = data.get("item")
+    if not item or data.get("currently_playing_type") != "track":
+        return JSONResponse({"playing": False})
+    return JSONResponse({
+        "playing": True,
+        "track":   item["name"],
+        "artist":  item["artists"][0]["name"],
+    })
+
+
 @app.get("/auth/logout")
 async def auth_logout(request: Request):
     response = RedirectResponse("/")
@@ -599,7 +646,7 @@ class GenerateRequest(BaseModel):
     song_count: int = 15
     mode: str = "adjacent_discovery"
     show_reasons: bool = False
-    genre_tag: str = ""                # if set, bypass seed and use genre pool
+    genre_tags: list[str] = []         # 1 tag = genre pool, 2 tags = genre blend
 
 
 class SaveRequest(BaseModel):
@@ -616,8 +663,8 @@ async def get_songs(request: Request, body: GenerateRequest):
     seed = body.seed.strip()
     description = body.prompt.strip()
 
-    genre_tag = body.genre_tag.strip()
-    if not seed and not description and not genre_tag:
+    genre_tags = [t.strip() for t in body.genre_tags if t.strip()]
+    if not seed and not description and not genre_tags:
         raise HTTPException(status_code=400, detail="Please enter a seed artist/track or a mood description")
 
     try:
@@ -631,8 +678,10 @@ async def get_songs(request: Request, body: GenerateRequest):
 
     # Route to the right pipeline
     try:
-        if genre_tag:
-            pool = await build_genre_pool(genre_tag)
+        if len(genre_tags) >= 2:
+            pool = await build_multi_genre_pool(genre_tags[0], genre_tags[1])
+        elif len(genre_tags) == 1:
+            pool = await build_genre_pool(genre_tags[0])
         elif "+" in seed:
             parts = [p.strip() for p in seed.split("+", 1)]
             pool = await build_blend_pool(parts[0], parts[1])

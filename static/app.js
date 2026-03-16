@@ -14,6 +14,7 @@ const els = {
   btnRegenerate:    $("btn-regenerate"),
   btnSave:          $("btn-save"),
   btnRetry:         $("btn-retry"),
+  btnNowPlaying:    $("btn-now-playing"),
   welcomeText:      $("welcome-text"),
   seedInput:        $("seed-input"),
   promptInput:      $("prompt-input"),
@@ -26,6 +27,7 @@ const els = {
   discoveryLabel:   $("discovery-label"),
   discoveryDesc:    $("discovery-desc"),
   genrePills:       $("genre-pills"),
+  genreBlendHint:   $("genre-blend-hint"),
   playlistNameInput: $("playlist-name-input"),
   loadingText:      $("loading-text"),
   sectionLoading:   $("section-loading"),
@@ -49,7 +51,7 @@ const DISCOVERY_MODES = {
 let lastPrompt = "";
 let currentSongs = [];
 let currentUris = [];
-let selectedGenreTag = "";
+let selectedGenreTags = [];   // max 2
 let genreDebounceTimer = null;
 
 function setState(state, payload = {}) {
@@ -115,12 +117,12 @@ async function fetchSongs(prompt) {
   setState(State.LOADING, { message: "Claude is picking songs and checking Spotify\u2026" });
   const song_count = parseInt(els.songCount.value, 10);
   const mode = DISCOVERY_MODES[els.discoveryMode.value]?.key ?? "adjacent_discovery";
-  const seed = selectedGenreTag ? "" : els.seedInput.value.trim();
+  const seed = selectedGenreTags.length > 0 ? "" : els.seedInput.value.trim();
   try {
     const resp = await fetch("/api/get-songs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, seed, song_count, mode, show_reasons: els.showReasons.checked, genre_tag: selectedGenreTag }),
+      body: JSON.stringify({ prompt, seed, song_count, mode, show_reasons: els.showReasons.checked, genre_tags: selectedGenreTags }),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -179,29 +181,43 @@ function renderGenrePills(tags) {
   els.genrePills.innerHTML = "";
   if (!tags || tags.length === 0) {
     els.genrePills.classList.add("hidden");
+    els.genreBlendHint.classList.add("hidden");
     return;
   }
   tags.forEach(tag => {
     const pill = document.createElement("button");
-    pill.className = "genre-pill" + (tag === selectedGenreTag ? " active" : "");
+    const isActive = selectedGenreTags.includes(tag);
+    pill.className = "genre-pill" + (isActive ? " active" : "");
     pill.textContent = tag;
     pill.addEventListener("click", () => {
-      if (selectedGenreTag === tag) {
-        selectedGenreTag = "";
+      if (selectedGenreTags.includes(tag)) {
+        // deselect
+        selectedGenreTags = selectedGenreTags.filter(t => t !== tag);
+      } else if (selectedGenreTags.length < 2) {
+        selectedGenreTags = [...selectedGenreTags, tag];
       } else {
-        selectedGenreTag = tag;
+        // replace oldest (first) selection
+        selectedGenreTags = [selectedGenreTags[1], tag];
       }
       renderGenrePills(tags);
     });
     els.genrePills.appendChild(pill);
   });
   els.genrePills.classList.remove("hidden");
+  // Show blend hint when 2 selected
+  if (selectedGenreTags.length === 2) {
+    els.genreBlendHint.textContent = `Blending: ${selectedGenreTags[0]} + ${selectedGenreTags[1]}`;
+    els.genreBlendHint.classList.remove("hidden");
+  } else {
+    els.genreBlendHint.classList.add("hidden");
+  }
 }
 
 function clearGenrePills() {
-  selectedGenreTag = "";
+  selectedGenreTags = [];
   els.genrePills.innerHTML = "";
   els.genrePills.classList.add("hidden");
+  els.genreBlendHint.classList.add("hidden");
 }
 
 async function fetchGenreTags(artistName) {
@@ -212,10 +228,8 @@ async function fetchGenreTags(artistName) {
   try {
     const resp = await fetch(`/api/tags?artist=${encodeURIComponent(artistName)}`);
     const data = await resp.json();
-    // keep active selection if it still exists in the new tag list
-    if (selectedGenreTag && !data.tags.includes(selectedGenreTag)) {
-      selectedGenreTag = "";
-    }
+    // remove any active selections no longer in new tag list
+    selectedGenreTags = selectedGenreTags.filter(t => (data.tags || []).includes(t));
     renderGenrePills(data.tags || []);
   } catch {
     clearGenrePills();
@@ -234,6 +248,32 @@ els.showReasons.addEventListener("change", () => {
 
 els.btnLogin.addEventListener("click", () => { window.location.href = "/auth/login"; });
 els.btnLogout.addEventListener("click", () => { window.location.href = "/auth/logout"; });
+
+els.btnNowPlaying.addEventListener("click", async () => {
+  els.btnNowPlaying.textContent = "\u25B6 Loading\u2026";
+  els.btnNowPlaying.disabled = true;
+  try {
+    const resp = await fetch("/api/now-playing");
+    const data = await resp.json();
+    if (data.playing) {
+      els.seedInput.value = `${data.artist} - ${data.track}`;
+      // trigger tag fetch for the artist
+      clearTimeout(genreDebounceTimer);
+      fetchGenreTags(data.artist);
+    } else {
+      els.btnNowPlaying.textContent = "\u25B6 Nothing playing";
+      setTimeout(() => {
+        els.btnNowPlaying.textContent = "\u25B6 Now playing";
+        els.btnNowPlaying.disabled = false;
+      }, 2000);
+      return;
+    }
+  } catch {
+    // silently ignore
+  }
+  els.btnNowPlaying.textContent = "\u25B6 Now playing";
+  els.btnNowPlaying.disabled = false;
+});
 
 els.songCount.addEventListener("input", () => {
   els.songCountLabel.textContent = els.songCount.value;
@@ -260,13 +300,13 @@ els.discoveryMode.addEventListener("input", () => {
 els.btnGenerate.addEventListener("click", () => {
   const seed = els.seedInput.value.trim();
   const prompt = els.promptInput.value.trim();
-  if (!seed && !prompt && !selectedGenreTag) {
+  if (!seed && !prompt && selectedGenreTags.length === 0) {
     els.promptError.classList.remove("hidden");
     els.seedInput.focus();
     return;
   }
   els.promptError.classList.add("hidden");
-  lastPrompt = prompt || selectedGenreTag || seed;
+  lastPrompt = prompt || selectedGenreTags.join(" + ") || seed;
   fetchSongs(prompt);
 });
 
