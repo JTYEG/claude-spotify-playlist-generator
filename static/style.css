@@ -458,3 +458,35 @@ input[type="text"]::placeholder {
   font-size: 14px;
   padding: 10px 14px 10px 4px;
 }
+
+/* Genre pills */
+.genre-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.genre-pill {
+  padding: 4px 12px;
+  border-radius: 500px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--surface2);
+  background: var(--surface2);
+  color: var(--text-muted);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  letter-spacing: 0.3px;
+}
+
+.genre-pill:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.genre-pill.active {
+  background: var(--green);
+  border-color: var(--green);
+  color: #000;
+}

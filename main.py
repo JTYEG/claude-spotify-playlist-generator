@@ -329,6 +329,35 @@ async def build_mood_pool(description: str) -> dict:
     }
 
 
+async def build_genre_pool(tag: str) -> dict:
+    """Genre pipeline: use an exact Last.fm tag to build a candidate pool."""
+    artist_names, tag_tracks = await asyncio.gather(
+        _lfm_tag_top_artists(tag, limit=10),
+        _lfm_tag_top_tracks(tag, limit=10),
+    )
+    artist_track_lists = await asyncio.gather(
+        *[_lfm_artist_top_tracks(a, limit=2) for a in artist_names[:8]]
+    )
+    all_candidates: list[dict] = list(tag_tracks)
+    for track_list in artist_track_lists:
+        all_candidates.extend(track_list)
+
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for c in all_candidates:
+        key = _normalize_key(c["track"], c["artist"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(c)
+
+    candidates = _unique_by_artist_limit(unique, max_per_artist=2)[:40]
+    return {
+        "seed":       {"track": "", "artist": tag},
+        "tags":       [tag],
+        "candidates": candidates,
+    }
+
+
 async def build_blend_pool(seed1: str, seed2: str) -> dict:
     """Blend pipeline: run both seeds in parallel, merge candidate pools."""
     pool1, pool2 = await asyncio.gather(build_seed_pool(seed1), build_seed_pool(seed2))
@@ -546,6 +575,13 @@ async def auth_status(request: Request):
     return JSONResponse({"logged_in": True, "display_name": session.get("display_name", "")})
 
 
+@app.get("/api/tags")
+async def get_artist_tags(artist: str):
+    """Return top Last.fm tags for an artist — used to populate genre pills in the UI."""
+    tags = await _lfm_artist_top_tags(artist.strip(), limit=14)
+    return JSONResponse({"tags": tags})
+
+
 @app.get("/auth/logout")
 async def auth_logout(request: Request):
     response = RedirectResponse("/")
@@ -563,6 +599,7 @@ class GenerateRequest(BaseModel):
     song_count: int = 15
     mode: str = "adjacent_discovery"
     show_reasons: bool = False
+    genre_tag: str = ""                # if set, bypass seed and use genre pool
 
 
 class SaveRequest(BaseModel):
@@ -579,7 +616,8 @@ async def get_songs(request: Request, body: GenerateRequest):
     seed = body.seed.strip()
     description = body.prompt.strip()
 
-    if not seed and not description:
+    genre_tag = body.genre_tag.strip()
+    if not seed and not description and not genre_tag:
         raise HTTPException(status_code=400, detail="Please enter a seed artist/track or a mood description")
 
     try:
@@ -593,7 +631,9 @@ async def get_songs(request: Request, body: GenerateRequest):
 
     # Route to the right pipeline
     try:
-        if "+" in seed:
+        if genre_tag:
+            pool = await build_genre_pool(genre_tag)
+        elif "+" in seed:
             parts = [p.strip() for p in seed.split("+", 1)]
             pool = await build_blend_pool(parts[0], parts[1])
         elif seed:
