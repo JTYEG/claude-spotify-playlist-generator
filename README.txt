@@ -1,0 +1,1 @@
+This is a README.txt file for the Spotify App project. The app allows users to manage and play music tracks from various sources. It includes features like playlist creation, music search, artist discovery, and user account management. Non-coders can use this application without needing to understand the underlying code.

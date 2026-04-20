@@ -30,11 +30,23 @@ const els = {
   resultCount:      $("result-count"),
   resultLink:       $("result-link"),
   errorMessage:     $("error-message"),
+  tasteProfile:     $("section-taste-profile"),
+  profileLoading:   $("profile-loading"),
+  profileContent:   $("profile-content"),
+  genreTags:        $("genre-tags"),
+  artistList:       $("artist-list"),
+  moodGrid:         $("mood-grid"),
+  audioBars:        $("audio-bars"),
+  trackList:        $("track-list"),
+  btnRefreshProfile: $("btn-refresh-profile"),
+  btnUseProfile:    $("btn-use-profile"),
 };
 
 let lastPrompt = "";
 let currentSongs = [];
 let currentUris = [];
+let tasteProfile = null;
+let usePersonalized = false;
 
 function setState(state, payload = {}) {
   els.sectionLoggedOut.classList.add("hidden");
@@ -92,6 +104,108 @@ function setState(state, payload = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Taste profile rendering
+// ---------------------------------------------------------------------------
+
+function renderTasteProfile(profile) {
+  tasteProfile = profile;
+
+  // Show/hide elements
+  els.profileLoading.classList.add("hidden");
+  els.profileContent.classList.remove("hidden");
+  els.tasteProfile.classList.remove("hidden");
+
+  // Render genres
+  els.genreTags.innerHTML = "";
+  (profile.top_genres || []).forEach(g => {
+    const tag = document.createElement("span");
+    tag.className = "genre-tag";
+    tag.textContent = `${g[0]} (${g[1]}x)`;
+    els.genreTags.appendChild(tag);
+  });
+
+  // Render artists
+  els.artistList.innerHTML = "";
+  (profile.top_artists || []).forEach(a => {
+    const span = document.createElement("span");
+    span.textContent = a[0];
+    els.artistList.appendChild(span);
+  });
+
+  // Render mood
+  els.moodGrid.innerHTML = "";
+  const moodItem = (label, value) => {
+    const div = document.createElement("div");
+    div.className = "mood-item";
+    div.innerHTML = `<span class="mood-item-label">${label}</span><span class="mood-item-value">${value}</span>`;
+    els.moodGrid.appendChild(div);
+  };
+  moodItem("Mood", profile.mood || "Unknown");
+  moodItem("Tempo", profile.tempo_preference || "Unknown");
+  moodItem("Tracks Analyzed", profile.total_tracks_analyzed || 0);
+
+  // Render audio bars
+  els.audioBars.innerHTML = "";
+  const features = profile.avg_features || {};
+  if (Object.keys(features).length > 0) {
+    const barLabels = {
+      danceability: "Dance",
+      energy: "Energy",
+      valence: "Positivity",
+      acousticness: "Acoustic",
+      instrumentalness: "Instrumental",
+      speechiness: "Speech",
+    };
+    const barKeys = Object.keys(barLabels);
+    barKeys.forEach(key => {
+      const val = features[key];
+      const pct = Math.round(val * 100);
+      const row = document.createElement("div");
+      row.className = "audio-bar-row";
+      row.innerHTML = `
+        <span class="audio-bar-label">${barLabels[key]}</span>
+        <div class="audio-bar-track">
+          <div class="audio-bar-fill" style="width: ${pct}%"></div>
+        </div>
+        <span class="audio-bar-value">${Math.round(val * 100)}</span>
+      `;
+      els.audioBars.appendChild(row);
+    });
+  }
+
+  // Render track list
+  els.trackList.innerHTML = "";
+  (profile.top_track_names || []).slice(0, 5).forEach((name, i) => {
+    const div = document.createElement("div");
+    div.className = "track-item";
+    div.innerHTML = `<span class="track-number">${i + 1}.</span><span>${name}</span>`;
+    els.trackList.appendChild(div);
+  });
+}
+
+async function fetchTasteProfile() {
+  els.profileLoading.classList.remove("hidden");
+  els.profileContent.classList.add("hidden");
+  els.tasteProfile.classList.remove("hidden");
+
+  try {
+    const resp = await fetch("/api/taste-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 50 }),
+    });
+    if (!resp.ok) {
+      els.tasteProfile.classList.add("hidden");
+      return;
+    }
+    const data = await resp.json();
+    renderTasteProfile(data);
+  } catch {
+    els.tasteProfile.classList.add("hidden");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Core actions
 // ---------------------------------------------------------------------------
 
@@ -102,7 +216,7 @@ async function fetchSongs(prompt) {
     const resp = await fetch("/api/get-songs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, song_count }),
+      body: JSON.stringify({ prompt, song_count, use_personalization: usePersonalized }),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -195,6 +309,17 @@ els.btnMakeAnother.addEventListener("click", () => {
 
 els.btnRetry.addEventListener("click", () => setState(State.LOGGED_IN));
 
+els.btnRefreshProfile.addEventListener("click", () => fetchTasteProfile());
+
+els.btnUseProfile.addEventListener("click", () => {
+  usePersonalized = true;
+  els.btnUseProfile.textContent = "Taste Profile Active \u2713";
+  els.btnUseProfile.style.background = "var(--green)";
+  els.btnUseProfile.style.color = "#000";
+  els.btnUseProfile.style.opacity = "1";
+  els.promptInput.focus();
+});
+
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
@@ -212,6 +337,7 @@ async function init() {
       if (oauthError) {
         setState(State.ERROR, { message: `Spotify login failed: ${oauthError}` });
       }
+      fetchTasteProfile();
     } else {
       setState(State.LOGGED_OUT);
       if (oauthError) {
