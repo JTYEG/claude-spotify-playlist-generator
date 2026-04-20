@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv/Scripts/uvicorn main:app --reload --port 8000)",
+      "WebFetch(domain:docs.continue.dev)",
+      "WebFetch(domain:www.reddit.com)"
+    ]
+  }
+}
