@@ -30,6 +30,45 @@
       <p class="version-label">v1.0</p>
       <p class="welcome" id="welcome-text"></p>
 
+      <!-- TASTE PROFILE SECTION -->
+      <div id="section-taste-profile" class="taste-profile-card hidden">
+        <div class="profile-header">
+          <h3 class="profile-title">Your Taste Profile</h3>
+          <button id="btn-refresh-profile" class="btn-profile-refresh" title="Refresh">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <path d="M17.65 6.35A7.958 7.958 0 0012 4c-1.15 0-2.25.24-3.25.65M6.35 7.65A7.958 7.958 0 0012 20c1.15 0 2.25-.24 3.25-.65M12 4v4M12 20v-4"/>
+            </svg>
+          </button>
+        </div>
+        <div id="profile-loading" class="hidden">
+          <div class="spinner spinner-sm"></div>
+          <p class="profile-loading-text">Analyzing your listening habits...</p>
+        </div>
+        <div id="profile-content">
+          <div class="profile-section">
+            <p class="profile-label">Favorite Genres</p>
+            <div class="genre-tags" id="genre-tags"></div>
+          </div>
+          <div class="profile-section">
+            <p class="profile-label">Top Artists</p>
+            <div class="artist-list" id="artist-list"></div>
+          </div>
+          <div class="profile-section">
+            <p class="profile-label">Mood & Energy</p>
+            <div class="mood-grid" id="mood-grid"></div>
+          </div>
+          <div class="profile-section">
+            <p class="profile-label">Audio Preferences</p>
+            <div class="audio-bars" id="audio-bars"></div>
+          </div>
+          <div class="profile-section">
+            <p class="profile-label">Current Favorites</p>
+            <div class="track-list" id="track-list"></div>
+          </div>
+          <button id="btn-use-profile" class="btn btn-spotify btn-profile-use">Use This Taste for Recommendations</button>
+        </div>
+      </div>
+
       <div class="form-group">
         <label for="prompt-input">Describe your playlist</label>
         <textarea

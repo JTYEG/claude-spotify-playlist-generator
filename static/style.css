@@ -381,3 +381,201 @@ textarea::placeholder {
   font-size: 14px;
   padding: 10px 14px 10px 4px;
 }
+
+/* Taste Profile */
+.taste-profile-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.profile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.profile-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.btn-profile-refresh {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.btn-profile-refresh:hover {
+  color: var(--green);
+  background: rgba(29, 185, 84, 0.1);
+}
+
+.profile-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 0;
+}
+
+.profile-loading-text {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.spinner-sm {
+  width: 24px;
+  height: 24px;
+}
+
+.profile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.genre-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.genre-tag {
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 500px;
+  font-weight: 500;
+}
+
+.artist-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.artist-list span {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.mood-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mood-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mood-item-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.mood-item-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.audio-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.audio-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audio-bar-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 80px;
+  text-transform: capitalize;
+}
+
+.audio-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--surface2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.audio-bar-fill {
+  height: 100%;
+  background: var(--green);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.audio-bar-value {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 30px;
+  text-align: right;
+}
+
+.track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.track-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.track-number {
+  color: var(--text-muted);
+  font-size: 11px;
+  min-width: 16px;
+}
+
+.btn-profile-use {
+  margin-top: 4px;
+}
+
+.personalization-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(29, 185, 84, 0.15);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 500px;
+  margin-bottom: 8px;
+}

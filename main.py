@@ -21,7 +21,7 @@ SPOTIFY_CLIENT_SECRET = os.environ["SPOTIFY_CLIENT_SECRET"]
 SPOTIFY_REDIRECT_URI = os.environ["SPOTIFY_REDIRECT_URI"]
 SECRET_KEY = os.environ["SECRET_KEY"]
 
-SPOTIFY_SCOPES = "playlist-modify-public playlist-modify-private user-read-private user-read-email"
+SPOTIFY_SCOPES = "playlist-modify-public playlist-modify-private user-read-private user-read-email user-top-read user-library-read"
 SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
@@ -111,10 +111,174 @@ async def refresh_token_if_needed(session: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Taste profile analysis
+# ---------------------------------------------------------------------------
+
+async def fetch_user_top_tracks(access_token: str, limit: int = 50) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{SPOTIFY_API_BASE}/me/top/tracks",
+            params={"limit": limit},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    if resp.status_code != 200:
+        return []
+    items = resp.json().get("items", [])
+    return [{"name": t["name"], "artists": [a["name"] for a in t["artists"]], "uri": t["uri"]} for t in items]
+
+
+async def fetch_user_top_artists(access_token: str, limit: int = 20) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{SPOTIFY_API_BASE}/me/top/artists",
+            params={"limit": limit},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    if resp.status_code != 200:
+        return []
+    items = resp.json().get("items", [])
+    return [{"name": a["name"], "genres": a.get("genres", []), "uri": a["uri"]} for a in items]
+
+
+async def fetch_user_saved_tracks(access_token: str, limit: int = 50) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{SPOTIFY_API_BASE}/me/tracks",
+            params={"limit": limit},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    if resp.status_code != 200:
+        return []
+    items = resp.json().get("items", [])
+    return [{"track": {
+        "name": it["track"]["name"],
+        "artists": [a["name"] for a in it["track"]["artists"]],
+        "uri": it["track"]["uri"],
+    }} for it in items]
+
+
+async def fetch_track_audio_features(access_token: str, track_uris: list[str]) -> dict:
+    if not track_uris:
+        return {}
+    features_map = {}
+    for i in range(0, len(track_uris), 100):
+        batch = track_uris[i:i+100]
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{SPOTIFY_API_BASE}/audio-features/tracks",
+                params={"ids": ",".join(batch)},
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        if resp.status_code == 200:
+            for f in resp.json().get("audio_features", []):
+                if f and f.get("uri"):
+                    features_map[f["uri"]] = f
+    return features_map
+
+
+def analyze_taste_profile(top_tracks: list, top_artists: list, saved_tracks: list, audio_features_map: dict) -> dict:
+    # Aggregate audio features across all tracks
+    all_features = []
+    for track in top_tracks:
+        for uri in [track["uri"]]:
+            if uri in audio_features_map:
+                all_features.append(audio_features_map[uri])
+    for track in saved_tracks:
+        uri = track["track"]["uri"]
+        if uri in audio_features_map:
+            all_features.append(audio_features_map[uri])
+
+    # Calculate average audio features
+    if all_features:
+        avg_features = {
+            "danceability": sum(f.get("danceability", 0) for f in all_features) / len(all_features),
+            "energy": sum(f.get("energy", 0) for f in all_features) / len(all_features),
+            "valence": sum(f.get("valence", 0) for f in all_features) / len(all_features),
+            "acousticness": sum(f.get("acousticness", 0) for f in all_features) / len(all_features),
+            "instrumentalness": sum(f.get("instrumentalness", 0) for f in all_features) / len(all_features),
+            "liveness": sum(f.get("liveness", 0) for f in all_features) / len(all_features),
+            "speechiness": sum(f.get("speechiness", 0) for f in all_features) / len(all_features),
+            "tempo": sum(f.get("tempo", 0) for f in all_features) / len(all_features),
+            "loudness": sum(f.get("loudness", 0) for f in all_features) / len(all_features),
+        }
+    else:
+        avg_features = {}
+
+    # Get top genres from top artists
+    genre_counts = {}
+    for artist in top_artists:
+        for genre in artist.get("genres", []):
+            genre_counts[genre] = genre_counts.get(genre, 0) + 1
+    top_genres = sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+
+    # Get top artists
+    artist_counts = {}
+    for track in top_tracks:
+        for artist_name in track.get("artists", []):
+            artist_counts[artist_name] = artist_counts.get(artist_name, 0) + 1
+    top_artist_names = sorted(artist_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    # Mood interpretation
+    mood = "balanced"
+    if avg_features:
+        if avg_features["valence"] >= 0.7:
+            mood = "positive/energetic"
+        elif avg_features["valence"] <= 0.3:
+            mood = "melancholic/introspective"
+        else:
+            mood = "mixed/moderate"
+
+        if avg_features["energy"] >= 0.7:
+            mood += "/high-energy"
+        elif avg_features["energy"] <= 0.3:
+            mood += "/chill"
+
+    # Tempo preference
+    tempo_pref = "mixed"
+    if avg_features.get("tempo"):
+        if avg_features["tempo"] > 120:
+            tempo_pref = "fast (120+ BPM)"
+        elif avg_features["tempo"] > 100:
+            tempo_pref = "moderate (100-120 BPM)"
+        else:
+            tempo_pref = "slow (<100 BPM)"
+
+    return {
+        "avg_features": avg_features,
+        "top_genres": top_genres,
+        "top_artists": top_artist_names,
+        "mood": mood,
+        "tempo_preference": tempo_pref,
+        "total_tracks_analyzed": len(all_features),
+        "top_track_names": [t["name"] for t in top_tracks[:5]],
+    }
+
+
+def build_taste_profile_prompt(profile: dict) -> str:
+    if not profile or not profile.get("top_genres"):
+        return ""
+
+    parts = []
+    parts.append(f"User's top genres: {', '.join(g[0] + f' ({g[1]}x)' for g in profile['top_genres'][:5])}")
+    parts.append(f"Favorite artists: {', '.join(a[0] for a in profile['top_artists'][:8])}")
+    parts.append(f"Overall mood preference: {profile['mood']}")
+    parts.append(f"Tempo preference: {profile['tempo_preference']}")
+
+    if profile.get("avg_features"):
+        af = profile["avg_features"]
+        parts.append(f"Audio feature profile: danceability={af['danceability']:.2f}, energy={af['energy']:.2f}, valence={af['valence']:.2f}, acousticness={af['acousticness']:.2f}")
+
+    parts.append(f"Current favorite tracks: {', '.join(profile.get('top_track_names', [])[:3])}")
+    parts.append(f"Basis: {profile['total_tracks_analyzed']} tracks analyzed from user's listening history")
+
+    return " | ".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Claude helper
 # ---------------------------------------------------------------------------
 
-def get_songs_from_claude(prompt: str, song_count: int = 15) -> list[dict]:
+def get_songs_from_claude(prompt: str, song_count: int = 15, taste_profile: str = "") -> list[dict]:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     user_message = (
         f'Generate {song_count} song recommendations for a playlist described as: "{prompt}"\n\n'
@@ -122,6 +286,8 @@ def get_songs_from_claude(prompt: str, song_count: int = 15) -> list[dict]:
         "Make them well-known enough to be findable on Spotify. "
         "Vary the artists — do not repeat the same artist more than twice."
     )
+    if taste_profile:
+        user_message += f'\n\nYour personal taste profile: {taste_profile}\nUse this to tailor your recommendations to the user\'s actual listening preferences.'
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
@@ -283,11 +449,52 @@ async def auth_logout(request: Request):
 class GenerateRequest(BaseModel):
     prompt: str
     song_count: int = 15
+    use_personalization: bool = False
 
 
 class SaveRequest(BaseModel):
     playlist_name: str = ""
     uris: list[str]
+
+
+class TasteProfileRequest(BaseModel):
+    limit: int = 50
+
+
+@app.post("/api/taste-profile")
+async def get_taste_profile(request: Request, body: TasteProfileRequest):
+    """Fetch user's listening history and return a taste profile."""
+    session = get_session(request)
+    if not session:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    try:
+        session = await refresh_token_if_needed(session)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Could not refresh Spotify token — please log in again")
+
+    access_token = session["access_token"]
+
+    # Fetch user data in parallel
+    try:
+        top_tracks = await fetch_user_top_tracks(access_token, limit=body.limit)
+        top_artists = await fetch_user_top_artists(access_token, limit=20)
+        saved_tracks = await fetch_user_saved_tracks(access_token, limit=body.limit)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch user data: {str(e)}")
+
+    # Fetch audio features for all tracks
+    all_uris = [t["uri"] for t in top_tracks] + [t["track"]["uri"] for t in saved_tracks]
+    audio_features_map = await fetch_track_audio_features(access_token, all_uris)
+
+    # Analyze and return profile
+    profile = analyze_taste_profile(top_tracks, top_artists, saved_tracks, audio_features_map)
+    profile["top_tracks"] = top_tracks[:10]
+    profile["top_artists_detail"] = top_artists[:10]
+
+    response = JSONResponse(profile)
+    set_session(response, session)
+    return response
 
 
 @app.post("/api/get-songs")
@@ -311,8 +518,22 @@ async def get_songs(request: Request, body: GenerateRequest):
     access_token = session["access_token"]
     song_count = max(5, min(50, body.song_count))
 
+    # Fetch user's taste profile for personalization
+    taste_profile_prompt = ""
+    if body.use_personalization:
+        try:
+            top_tracks = await fetch_user_top_tracks(access_token, limit=50)
+            top_artists = await fetch_user_top_artists(access_token, limit=20)
+            saved_tracks = await fetch_user_saved_tracks(access_token, limit=50)
+            all_uris = [t["uri"] for t in top_tracks] + [t["track"]["uri"] for t in saved_tracks]
+            audio_features_map = await fetch_track_audio_features(access_token, all_uris)
+            profile = analyze_taste_profile(top_tracks, top_artists, saved_tracks, audio_features_map)
+            taste_profile_prompt = build_taste_profile_prompt(profile)
+        except Exception:
+            pass  # Proceed without personalization if profile fetch fails
+
     try:
-        songs = get_songs_from_claude(prompt, song_count)
+        songs = get_songs_from_claude(prompt, song_count, taste_profile_prompt)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Claude error: {str(e)}")
 
